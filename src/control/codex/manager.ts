@@ -1852,13 +1852,17 @@ export class AgentManager {
     const p = (params ?? {}) as Record<string, unknown>;
 
     if (method === "turn/completed") {
-      const turn = p.turn as { id?: string; status?: string; error?: { message?: unknown; codexErrorInfo?: { responseTooManyFailedAttempts?: { httpStatusCode?: unknown } } } | null } | undefined;
+      const turn = p.turn as { id?: string; status?: string; error?: { message?: unknown; codexErrorInfo?: unknown } | null } | undefined;
       if (turn?.id) {
         this.#flushDeltas();
-        // Still rate limited after Codex's retries and the gateway's wait: said in words the person can act on.
-        const busy = turn.error?.codexErrorInfo?.responseTooManyFailedAttempts?.httpStatusCode === 429;
-        if (busy) this.#turnErrors.set(turn.id, t().agent.turn.modelBusy);
-        else if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);
+        // A failure of the model service (usage limit, rate limit, outage): the person is only told the service is under
+        // maintenance; what it was goes to the log. A turn too long for the model is the person's to act on and keeps its words.
+        const info = turn.error?.codexErrorInfo;
+        const service = info != null && !(typeof info === "string" ? info : Object.keys(info as object)[0] ?? "").startsWith("contextWindow");
+        if (service) {
+          this.#log.warn("model service failed a turn", { turnId: turn.id, info: JSON.stringify(info).slice(0, 200), error: String(turn.error?.message ?? "").slice(0, 300) });
+          this.#turnErrors.set(turn.id, t().agent.turn.maintenance);
+        } else if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);
         this.#completedTurns.set(turn.id, { status: turn.status ?? "completed" });
         const waiter = this.#completionWaiters.get(turn.id);
         if (waiter) {

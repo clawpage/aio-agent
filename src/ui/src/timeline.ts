@@ -968,14 +968,19 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
       pushNotice(state, turnId, { kind: "status", id: `thread:${String(p.threadId ?? event.id)}`, text: t.chat.timeline.notices.started, level: "info" });
       return;
     }
-    case "error":
+    case "error": {
+      // The model service's own error (Codex's `error` notice, with its details): Codex is retrying it, or the turn's failure
+      // follows; either way the person is only told the service is under maintenance.
+      const service = typeof p.error === "object" && p.error !== null;
+      if (service && p.willRetry === true) return;
       pushNotice(state, resolveTurnId(state, event), {
         kind: "status",
         id: `err:${event.id}`,
-        text: t.chat.timeline.notices.error(text(p.message) || JSON.stringify(p).slice(0, 300)),
+        text: service ? t.chat.timeline.notices.maintenance : t.chat.timeline.notices.error(text(p.message) || JSON.stringify(p).slice(0, 300)),
         level: "error",
       });
       return;
+    }
     case "warning":
       // Provider catalog diagnostics belong in runtime logs, not the chat UI.
       if (/^Model metadata for .+ not found\.\s*Defaulting to fallback metadata\b/i.test(text(p.message))) return;

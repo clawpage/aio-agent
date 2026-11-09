@@ -658,7 +658,7 @@ describe("AgentManager with the Claude Code harness", () => {
     expect(row).toMatchObject({ status: "failed", error: "Run failed: Not logged in" });
   });
 
-  it("says in words what a run still rate limited after every retry means", async () => {
+  it("tells the person only that the service is under maintenance when the model service fails a run", async () => {
     agent.saveAgentSettings({ model: "claude-opus-5-5", effort: null }, await agent.listModels());
     const conv = agent.createConversation({ title: "busy" });
     const { turn } = agent.submitTurn({ conversationId: conv.id, text: "旧的肉泥放到第二顿", clientMessageId: "b1" });
@@ -669,7 +669,17 @@ describe("AgentManager with the Claude Code harness", () => {
     await tick();
     const row = db.prepare("SELECT status, error FROM turns WHERE id = ?").get(turn.id) as { status: string; error: string };
     expect(row.status).toBe("failed");
-    expect(row.error).toContain("rate limited");
+    expect(row.error).toContain("under maintenance");
     expect(row.error).not.toContain("exceeded retry limit");
+    // A usage limit too: none of its wording, links or ids reach the person.
+    const second = agent.submitTurn({ conversationId: conv.id, text: "再试一次", clientMessageId: "b2" }).turn;
+    await tick();
+    const next = codex.startedTurns.at(-1)!;
+    codex.emitNotification("turn/completed", { threadId: next.threadId, turn: { id: next.turnId, status: "failed",
+      error: { message: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits", codexErrorInfo: "usageLimitExceeded" } } });
+    await tick();
+    const limited = db.prepare("SELECT error FROM turns WHERE id = ?").get(second.id) as { error: string };
+    expect(limited.error).toContain("under maintenance");
+    expect(limited.error).not.toContain("chatgpt.com");
   });
 });

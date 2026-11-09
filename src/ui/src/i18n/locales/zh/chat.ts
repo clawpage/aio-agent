@@ -129,6 +129,7 @@ export const chat = {
       reconciled: "服务重启后状态已核对",
       stopRequested: "已请求停止…",
       started: "已开始处理任务",
+      maintenance: "服务维护中，请稍后再试",
       error: (message: string) => `错误：${message}`,
       warning: (message: string) => `提示：${message}`,
     },

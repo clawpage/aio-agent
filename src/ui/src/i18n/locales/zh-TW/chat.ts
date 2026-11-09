@@ -130,6 +130,7 @@ export const chat: typeof zh = {
       reconciled: "服務重啟後狀態已核對",
       stopRequested: "已請求停止…",
       started: "已開始處理任務",
+      maintenance: "服務維護中，請稍後再試",
       error: (message: string) => `錯誤：${message}`,
       warning: (message: string) => `提示：${message}`,
     },

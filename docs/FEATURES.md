@@ -276,7 +276,7 @@ owner 在配置「用户支持」下的「回复反馈」看最近 200 条（账
     按 `Retry-After`（或 `retry-after-ms`）等，没有就按 1、2、4、8、16、30 秒退避，单次最多等 30 秒、总共最多 60 秒，成员断开即停；
     用量上限（`usage_limit_reached` 等）或要求等更久的不硬等，原样转回并带上 `Retry-After`。两条路由的上游错误都记日志（状态、
     `Retry-After`、错误正文前 300 字，不含凭据），`Retry-After` 都随错误转回（Claude Code 自己会照它等）。
-    仍然失败的轮次显示为「执行失败：模型服务这会儿太忙（限流）……请过一两分钟再发一次」，不再是英文原文。
+    模型服务本身的失败（用量上限、限流重试后仍失败、服务出错等，Codex 带 `codexErrorInfo` 的错误；上下文过长除外）对用户只显示「执行失败：服务维护中，请稍后再试」，详情只进日志（`model service failed a turn`）；执行过程里 Codex 的错误提示同样只显示「服务维护中」，正在重试的不显示。
 - **账号路径**：主控制台为 `<主域名>/u/<用户名>`，根路径和 `/login` 登录后跳到自己的地址；同一浏览器一次只登录一个账号，
   打开别人的地址只显示「这是 X 的页面」。页面路由（`src/ui/src/route.ts`）：`/tasks`、`/tasks/<任务id>`、`/schedules`、
   `/vault`、`/usage`、`/analytics`、`/gadget` 与 `/settings`（仅 owner）、`/workspace`（叠加在页面上，关闭即后退）。

@@ -20,7 +20,7 @@ export const agent: typeof zh = {
         outcomeUnknown: (cause: string) => `${cause}。今回の実行結果は不明です`,
         outcomeUnknownNotice: (cause: string) => `${cause}。今回の実行結果は不明で、操作が行われた可能性があります。タスクは新しいターンで自動的に続き、まずどの操作が反映済みかを確認します。それ以外の場合は、サンドボックス内のファイルやプロセスの状態を確認してから送信し直してください。`,
         checkSandbox: (message: string) => `${message}。先にサンドボックス内のファイルとプロセスの状態を確認してください。このターンは自動では再実行しません。`,
-        modelBusy: "モデルのサービスが混み合っていて（レート制限）、待って再試行しても成功しませんでした。1〜2 分してからもう一度送信してください",
+        maintenance: "サービスはメンテナンス中です。しばらくしてからもう一度お試しください",
         failed: (reason: string) => `実行に失敗しました：${reason}`,
         codexEnded: (status: string) => `Codex のターンの終了状態：${status}`,
         stopTimedOut: (minutes: number) => `停止を要求してから ${minutes} 分たっても終了していません`,

@@ -129,6 +129,7 @@ export const chat: typeof zh = {
       reconciled: "Status checked after the service restarted",
       stopRequested: "Stop requested…",
       started: "Started working on the task",
+      maintenance: "The service is under maintenance. Please try again later",
       error: (message: string) => `Error: ${message}`,
       warning: (message: string) => `Note: ${message}`,
     },

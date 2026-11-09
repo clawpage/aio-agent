@@ -39,6 +39,12 @@
   min-width: 0;
 }
 
+html {
+  /* iOS enlarges text in blocks it thinks are too wide to read; the console sets its own sizes. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 html,
 body {
   margin: 0;
@@ -1384,6 +1390,9 @@ button .loading-mark { color: inherit; }
 
 .status-line {
   font-size: 12.5px;
+  /* A long unbroken message (a URL, JSON) wraps instead of widening the line, which iOS answered by enlarging the text. */
+  overflow-wrap: anywhere;
+  min-width: 0;
   color: var(--text-dim);
   padding: 2px 4px;
   border-left: 2px solid var(--border);

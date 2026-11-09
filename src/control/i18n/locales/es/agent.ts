@@ -20,7 +20,7 @@ export const agent: typeof zh = {
         outcomeUnknown: (cause: string) => `${cause}; se desconoce el resultado de esta ejecución`,
         outcomeUnknownNotice: (cause: string) => `${cause}; se desconoce el resultado de esta ejecución y es posible que ya haya actuado. Una tarea continúa sola en un turno nuevo, comprobando primero lo que ya se hizo; en otro caso, revisa los archivos y procesos del entorno aislado antes de volver a enviarlo.`,
         checkSandbox: (message: string) => `${message}. Una tarea continúa sola en un turno nuevo, comprobando primero lo que ya se hizo; en otro caso, revisa los archivos y procesos del entorno aislado antes de volver a enviarlo.`,
-        modelBusy: "el servicio del modelo está saturado ahora mismo (límite de solicitudes) y lo seguía estando tras esperar y reintentar; vuelve a enviarlo en un par de minutos",
+        maintenance: "El servicio está en mantenimiento. Inténtalo de nuevo más tarde",
         failed: (reason: string) => `La ejecución falló: ${reason}`,
         codexEnded: (status: string) => `El turno de Codex terminó con el estado: ${status}`,
         stopTimedOut: (minutes: number) => `Sigue sin terminar ${minutes} ${minutes === 1 ? "minuto" : "minutos"} después de la solicitud de detención`,

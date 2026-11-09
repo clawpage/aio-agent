@@ -380,6 +380,19 @@ describe("working groups", () => {
     expect(status.text).toContain("沙箱崩了");
   });
 
+  it("shows the model service's own errors only as the service being under maintenance, and none while Codex retries", () => {
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ev("error", { error: { message: "Reconnecting... 1/5", codexErrorInfo: { responseStreamDisconnected: {} } }, willRetry: true, turnId: "t1" }, "t1"),
+      ev("error", { error: { message: "You've hit your usage limit. Visit https://chatgpt.com/settings/usage", codexErrorInfo: "usageLimitExceeded" }, willRetry: false, turnId: "t1" }, "t1"),
+    ]);
+    const notices = state.blocks.filter((b) => b.kind === "status") as Array<{ level: string; text: string }>;
+    expect(notices).toHaveLength(1);
+    expect(notices[0]!.level).toBe("error");
+    expect(notices[0]!.text).not.toContain("chatgpt.com");
+    expect(notices[0]!.text).not.toContain("{");
+  });
+
   it("marks a turn that failed for want of a browser, whatever language its message is in", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),
