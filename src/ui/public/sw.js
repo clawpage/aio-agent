@@ -34,7 +34,21 @@ self.addEventListener("fetch", (event) => {
   // Console routes have no file extension; the policy pages and other files are left alone.
   if (request.mode === "navigate" && request.destination === "document" && !/\.[^/]*$/.test(url.pathname)) event.respondWith(openPage(event));
   else if (url.pathname.startsWith("/assets/")) event.respondWith(buildFile(event));
+  else if (url.pathname === GUARD) event.respondWith(guardFile(event));
 });
+
+/** The start guard the page loads before the app (boot.js): from the cache at once, refreshed behind, so it never holds an opening up. */
+const GUARD = "/boot.js";
+async function guardFile(event) {
+  const cache = await caches.open(CACHE);
+  const saved = await cache.match(GUARD);
+  const fresh = fetch(event.request).then(async (response) => {
+    if (response.ok && response.status === 200) await cache.put(GUARD, response.clone());
+    return response;
+  });
+  if (saved) { event.waitUntil(fresh.catch(() => undefined)); return saved; }
+  return fresh;
+}
 
 async function openPage(event) {
   const saved = await caches.match(PAGE, { cacheName: CACHE });

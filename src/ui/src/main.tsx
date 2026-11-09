@@ -6,6 +6,9 @@ import { locale, t } from "./i18n";
 import "./theme.css";
 import "./styles.css";
 
+// The start guard (public/boot.js) learns the app's script arrived and runs.
+(window as Window & { __aioStarted?: boolean }).__aioStarted = true;
+
 // The page speaks the chosen language: its lang (fonts, screen readers), the tab title and the home-screen name.
 document.documentElement.lang = locale;
 document.title = t.app.brand.name;
