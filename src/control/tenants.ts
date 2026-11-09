@@ -172,6 +172,8 @@ export class UserRuntimes {
     // A member's tokens are limited per day (src/control/quota.ts); the owner's are not.
     if(user.role==='member')runtime.ctx.tasks.setQuota(()=>quotaStatus(runtime.ctx.db));
     runtime.ctx.tasks.setLastOpened(()=>SessionStore.lastSeen(this.root.db,user.id));
+    // Each turn's brief of the account's execution environments (docs/EXEC-ENVS.md).
+    const envs=this.root.envs;if(envs&&runtime.ctx.cfg.execEnvs)runtime.ctx.tasks.setEnvs(id=>envs.snapshot(id));
     // A container found stopped stays stopped: its account's first use starts it, so a
     // service start no longer wakes every account. Only where idle stopping is on;
     // without it nothing would start the container later.

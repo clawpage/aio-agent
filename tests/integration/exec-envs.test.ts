@@ -3,10 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
-import { startHarness } from "../helpers/harness.js";
+import { login, startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
 import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
 import { macParts } from "../helpers/macNative.js";
+import { IosDeviceGateway } from "../../src/control/iosDevice.js";
 import { EnvRegistry } from "../../src/control/envs/registry.js";
 import { ENV_TOOLS, EnvGateway, envMcpServers, envThreadServers } from "../../src/control/envs/gateway.js";
 import { ENV_POLICY, envBrief } from "../../src/control/envs/policy.js";
@@ -144,11 +145,14 @@ function runtimeFor(userId: string, port: number) {
   return runtime;
 }
 
+/** A runtime's gateway URL as reached from here (the sandbox reaches it as host.docker.internal). */
+const local = (url: string) => url.replace(/^http:\/\/host\.docker\.internal:\d+/, `http://127.0.0.1:${gateway.port}`);
+
 /** The account's aio_env, as its executor calls it. */
 function executor(runtime: { env?: { url: string } }) {
   let id = 0;
   const rpc = async (method: string, params: unknown = {}) => {
-    const res = await fetch(runtime.env!.url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
+    const res = await fetch(local(runtime.env!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
     return (await res.json()) as { result: any; error?: unknown };
   };
   const call = async (name: string, args: Record<string, unknown> = {}) => (await rpc("tools/call", { name, arguments: args })).result as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean };
@@ -178,7 +182,9 @@ beforeEach(async () => {
   registry = new EnvRegistry({ links, log, phone: mac.phone, browser: mac.browser, shell: mac.shell });
   envs = new EnvGateway({ cfg, log, port: 0, usernameOf: names, userIdOf: ids, links, registry, workspace: "/home/gem/workspace",
     filesFor: async (userId) => ({ read: async (file) => { const kept = saved.get(file); if (!kept || kept.userId !== userId) throw new Error("no such file"); return kept.bytes; }, write: async (file, bytes) => { saved.set(file, { userId, bytes: Buffer.from(bytes) }); } }) });
-  gateway = new MemberModelGateway(cfg, log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, mac.native, undefined, undefined, undefined, envs);
+  // The per-device servers of today, kept for runtimes with the environments off.
+  const ios = new IosDeviceGateway({ cfg, log, port: 0, usernameOf: names, userIdOf: ids, links, workspace: "/home/gem/workspace", filesFor: async () => ({ read: async () => { throw new Error("unused"); }, write: async () => undefined }) });
+  gateway = new MemberModelGateway(cfg, log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, mac.native, undefined, undefined, ios, envs);
   await gateway.start();
   Object.assign(h.ctx, { deviceLinks: links, envs: registry });
   h.server.removeAllListeners("upgrade");
@@ -390,7 +396,7 @@ describe("boundaries", () => {
     expect(bobAgent.text(stolen)).toMatch(/no environment/i);
     expect(iphone.calls()).toEqual([]);
     // A forged capability URL is refused outright.
-    expect((await fetch(aliceRuntime.env!.url.replace(/[a-f0-9]{64}/, "0".repeat(64)), { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(local(aliceRuntime.env!.url).replace(/[a-f0-9]{64}/, "0".repeat(64)), { method: "POST", body: "{}" })).status).toBe(403);
 
     iphone.ws.close();
     await waitFor(async () => (await registry.list(alice.id)).find((e) => e.kind === "ios" && !e.online));
@@ -416,6 +422,28 @@ describe("choosing the environment", () => {
     // A message typed on the web does not make the phone the first choice.
     expect(envBrief(await registry.list(alice.id), "web")).not.toMatch(/using it now/i);
     expect(ENV_POLICY).toMatch(/scheduled runs stay in the sandbox/i);
+  });
+});
+
+describe("the brief at the start of a turn", () => {
+  it("reaches the executor, with the device the message was typed on first", async () => {
+    const owner = await login(h);
+    const headers = { cookie: owner.cookie, "x-csrf-token": owner.csrf, "content-type": "application/json" };
+    Object.assign(h.ctx.cfg, { execEnvs: true, env: { url: "http://host.docker.internal:0/env/x/mcp" } });
+    h.ctx.tasks.setEnvs((id) => registry.snapshot(id));
+    Object.assign(h.codex, { planTask: async () => JSON.stringify({ title: "照片", related: [], dependencies: [], resources: [] }) });
+    const ownerId = h.ctx.cfg.runtimeUserId!;
+    await connect(newIphone(url, await link({ headers }, "ios", "iPhone")), ownerId, 1);
+    const sent = await h.request("/api/tasks", { method: "POST", headers: { ...headers, "x-client-platform": "ios" }, body: JSON.stringify({ text: "把这张照片发给我", clientMessageId: "from-phone" }) });
+    expect(sent.status).toBe(202);
+    const turn = await waitFor(() => h.codex.startedTurns.at(-1));
+    expect(turn.text).toContain("Execution environments now");
+    expect(turn.text).toMatch(/Alice's iPhone \(ios:[a-z0-9]{8}, ios\): online, app on screen; browser, files, photos, calendar — the user is using it now/);
+    // A message from the web lists the phone without putting it first.
+    await h.request("/api/tasks", { method: "POST", headers: { ...headers, "x-client-platform": "web" }, body: JSON.stringify({ text: "查一下天气", clientMessageId: "from-web" }) });
+    const second = await waitFor(() => h.codex.startedTurns.length > 1 ? h.codex.startedTurns.at(-1) : undefined);
+    expect(second.text).toContain("Alice's iPhone");
+    expect(second.text).not.toMatch(/using it now/);
   });
 });
 

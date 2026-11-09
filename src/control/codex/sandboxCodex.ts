@@ -7,6 +7,7 @@ import { kbThreadServers } from "../kb.js";
 import { haThreadServers } from "../ha.js";
 import { macNativeThreadServers } from "../macNative.js";
 import { iosThreadServers } from "../iosDevice.js";
+import { envThreadServers } from "../envs/gateway.js";
 import { scheduleThreadServers } from "../scheduleTool.js";
 import { taskKbThreadServers } from "../taskKb/gateway.js";
 import { imageThreadServers } from "../imageTool.js";
@@ -655,7 +656,7 @@ export class SandboxCodexSession {
   #executionConfig(task: BrowserTask | undefined): { config?: Record<string, unknown> } {
     if (!task) return {};
     const tabs = tabThreadConfig(task) as { mcp_servers: Record<string, unknown> };
-    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...taskKbThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...ttsThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...macNativeThreadServers(this.#cfg, task), ...iosThreadServers(this.#cfg) } } };
+    return { config: { ...tabs, mcp_servers: { ...tabs.mcp_servers, ...decisionThreadServers(this.#cfg), ...scheduleThreadServers(this.#cfg), ...taskKbThreadServers(this.#cfg), ...imageThreadServers(this.#cfg), ...ttsThreadServers(this.#cfg), ...kbThreadServers(this.#cfg), ...haThreadServers(this.#cfg), ...printerThreadServers(this.#cfg), ...macNativeThreadServers(this.#cfg, task), ...iosThreadServers(this.#cfg), ...envThreadServers(this.#cfg, task) } } };
   }
 
   async startThread(

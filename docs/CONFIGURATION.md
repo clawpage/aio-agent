@@ -137,6 +137,7 @@
 | `PA_KEYBOARD_BRIDGE_PORT` / `PA_KEYBOARD_DIR` | `4904` / `var/keyboard` | 键盘桥监听端口（只听 127.0.0.1）与 AIO Keyboard.app 构建目录 |
 | `PA_DICTATION_MODEL` | `claude-sonnet-5-5` | 语音转写的润色模型（用 owner 的 Claude 凭据）：输入区语音输入与语音键盘共用 |
 | `PA_VOICE_LOG_USERS` | 空 | 留存这些账号的语音输入（录音与识别、润色结果）供 `bin/voice-replay.mjs` 回测；逗号分隔用户名，`*` 为全部，空为不留存 |
+| `PA_EXEC_ENVS` | `0` | `1` 时执行器经一个工具服务 `aio_env` 使用账号的全部执行环境（Mac、iPhone、安卓），每轮开头附上环境简报，取代 `aio_mac_native` 与 `aio_ios`；旧设备经适配照常可用。设计与上线步骤见 [执行环境](EXEC-ENVS.md) |
 | `PA_VOICE_LOG_DAYS` / `PA_VOICE_LOG_DIR` | `30` / `<数据目录>/voice-log` | 语音日志保留天数与位置 |
 | `PA_DICTATION_EFFORT` | `low` | 润色模型的 effort（`low` 实测 1–2 秒、纠错不输默认档）；留空用模型默认值，换成不支持 effort 的模型时须留空 |
 | `PA_GADGET_TOKEN_PATH` | `<数据目录>/gadget-token.env` | 语音配件令牌与绑定账号 |

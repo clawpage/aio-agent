@@ -400,6 +400,13 @@ export function loadConfig(): {
   /** This runtime's URL for its account's iPhone (photos, reminders, calendar) on the member gateway, when it linked an iPhone (IosDeviceGateway). */
   ios?: { url: string };
   /**
+   * The execution environments (PA_EXEC_ENVS=1, docs/EXEC-ENVS.md): executors reach every linked device through
+   * one server, aio_env, and each turn starts with a brief of what is online, in place of aio_ios and aio_mac_native.
+   */
+  execEnvs?: boolean;
+  /** This runtime's aio_env URL on the member gateway (EnvGateway), when execEnvs is on. */
+  env?: { url: string };
+  /**
    * The voice gadget's dictation page (src/control/dictation.ts): the keyboard
    * bridge on the host Mac (bin/keyboard-bridge.mjs) types what the gadget heard,
    * after `polishModel` polishes it with the owner's Claude credential. Without a URL
@@ -541,6 +548,7 @@ export function loadConfig(): {
     ownerPassword: envStr("PA_OWNER_PASSWORD", ""),
     // Opt-in operator action: rotate the owner password and rewrite the local secret file.
     ownerPasswordReset: envStr("PA_OWNER_PASSWORD_RESET", "0") === "1",
+    execEnvs: envStr("PA_EXEC_ENVS", "0") === "1",
     sandbox: {
       image: envStr("PA_SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:1.11.0"),
       containerName: envStr("PA_SANDBOX_CONTAINER", "personal-agent-sandbox"),

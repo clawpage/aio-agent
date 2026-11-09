@@ -1134,7 +1134,7 @@ export function createApiRouter(context: AppContext): Router {
         if (!checked.ok) throw new Error(checked.message);
         return { path: checked.path, kind: a.kind === "image" ? "image" as const : "file" as const, name: typeof a.name === "string" ? a.name : "" };
       }) : [];
-      const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null, locale: typeof b.locale === "string" ? b.locale : null });
+      const result = context.tasks.submit({ userId: ctxOf(req).session!.ownerId, text: b.text, clientMessageId: b.clientMessageId, attachments, relatedTaskId: typeof b.relatedTaskId === "string" ? b.relatedTaskId : null, locale: typeof b.locale === "string" ? b.locale : null, platform: req.get("x-client-platform") ?? null });
       if (!result.duplicate) track(req, "task_submit", { attachments: attachments.length, images: attachments.filter((a: { kind: string }) => a.kind === "image").length, reference: typeof b.relatedTaskId === "string" });
       res.status(result.duplicate ? 200 : 202).json(result);
     } catch (err) {
@@ -2180,7 +2180,8 @@ export function createApiRouter(context: AppContext): Router {
   );
 
   // Macs this account linked to offer their phones (the app's bridge dials in with the token, DeviceLinks),
-  // and, as kind "ios", iPhones the iOS app linked to offer their photos, reminders and calendar (iosDevice.ts).
+  // as kind "ios", iPhones the iOS app linked to offer their photos, reminders and calendar (iosDevice.ts), and as kind "android",
+  // phones the Android app linked (docs/EXEC-ENVS.md).
   // The token is returned once, to the console that asked for it, which hands it to the app.
   const linkKind = (raw: unknown): DeviceKind | null => raw === undefined || raw === "" ? "mac" : DEVICE_KINDS.find((k) => k === raw) ?? null;
   router.get("/device-links", requireKind("primary"), requireSession, (req, res) => {
@@ -2194,7 +2195,7 @@ export function createApiRouter(context: AppContext): Router {
     if (!kind) { res.status(400).json({ error: "bad_request" }); return; }
     const name = typeof req.body?.name === "string" ? req.body.name : "";
     const { link, token } = context.deviceLinks.create(ctxOf(req).session!.ownerId, name, kind);
-    audit(db, kind === "ios" ? "ios_link_created" : "device_link_created", link.id, ctxOf(req).ip);
+    audit(db, kind === "mac" ? "device_link_created" : `${kind}_link_created`, link.id, ctxOf(req).ip);
     res.setHeader("Cache-Control", "no-store");
     res.json({ link, token });
   });

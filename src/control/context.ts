@@ -24,6 +24,7 @@ import type { UserBrowserGateway } from "./userBrowser.js";
 import type { MacShellGateway } from "./macShell.js";
 import type { HaCameras } from "./camera.js";
 import type { DeviceLinks } from "./deviceLink.js";
+import type { EnvRegistry } from "./envs/registry.js";
 import type { IosDeviceGateway } from "./iosDevice.js";
 import type { Vault } from "./vault.js";
 import type { Analytics } from "./analytics.js";
@@ -56,6 +57,8 @@ export interface AppContext {
   deviceLinks?: DeviceLinks;
   /** The account's iPhone abilities, reached over its device links (iosDevice.ts). */
   ios?: IosDeviceGateway;
+  /** Every execution environment of each account (docs/EXEC-ENVS.md); shared by every runtime. */
+  envs?: EnvRegistry;
   /** The account's password vault; absent in runtimes built by hand in tests. */
   vault?: Vault;
   /** True while the vault is signing in for a tab's request (startVaultAutofill): not the person's to answer yet. */

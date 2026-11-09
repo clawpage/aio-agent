@@ -27,6 +27,8 @@ import { kbBrief, kbEnabled } from "../taskKb/read.js";
 import { MAX_ATTACHMENTS } from "../../common/attachments.js";
 import { accountTimezone, DailyLimitError, limitMessage } from "../quota.js";
 import type { QuotaStatus } from "../../common/usage.js";
+import type { EnvInfo } from "../envs/catalog.js";
+import { envBrief } from "../envs/policy.js";
 import { ATTENTION_STATUSES, DONE_STATUSES, WORKING_STATUSES, type TaskBucket, type TaskCounts, type TaskFilter, type TaskListPage } from "../../common/taskList.js";
 
 /** Bounded context keeps both live work and older matches in one Jev call. */
@@ -57,6 +59,7 @@ interface TaskRow {
     created_at: number;
     completed_at: number | null;
     schedule_id: string | null;
+    client_platform?: string | null;
 }
 interface ScheduleRow {
     id: string;
@@ -137,7 +140,10 @@ export interface TaskInput {
     relatedTaskId?: string | null;
     /** The console language the message was sent from; it becomes the account's language. */
     locale?: string | null;
+    /** The console it was typed in (x-client-platform): the device the user is on, for the environment brief. */
+    platform?: string | null;
 }
+const PLATFORMS = new Set(["ios", "android", "mac", "pwa", "web"]);
 const TERMINAL = new Set(["completed", "failed", "interrupted", "unknown"]);
 /** How many widgets an execution prompt names. */
 const WIDGETS_SHOWN = 20;
@@ -298,6 +304,14 @@ export class TaskService {
         return [`The user's clawpages (web pages and mini apps published for them; ${pages.length} in all${pages.length > shown.length ? `, the ${shown.length} most recently active listed` : ""}). When this message is about one of them, work on that clawpage with the clawpages skill: read or change its data with its data commands, and to change the page, pull it, edit, and publish again under the same name so the link stays. The data reflects what visitors and the user did since; it is the user's, so do not delete or overwrite it unless asked. A page with collaborators is also changed by other people's agents: pull it before changing it:`, ...lines].join("\n");
     }
     /** The account's widgets, so its executor reuses and improves them instead of building another. */
+    /** The account's execution environments as they are now (EnvRegistry.snapshot), when the runtime runs with them (PA_EXEC_ENVS). */
+    setEnvs(list: ((ownerId: string) => EnvInfo[]) | null): void { this.#envs = list; }
+    #envs: ((ownerId: string) => EnvInfo[]) | null = null;
+    /** What is online now and the device the user typed on (docs/EXEC-ENVS.md); none for a gadget, or with the environments off. */
+    private envBriefFor(row: TaskRow): string | null {
+        if (!this.#envs || !this.cfg.env) return null;
+        return envBrief(this.#envs(this.ownerId(row)), row.schedule_id ? null : row.client_platform) || null;
+    }
     /** A member's daily tokens (src/control/quota.ts): once used up, no new turn starts until the day turns over. */
     setQuota(status: (() => QuotaStatus) | null): void { this.#quota = status; }
     /** When the person last had the console open (their sessions, kept in the main database); null when unknown. */
@@ -517,8 +531,8 @@ export class TaskService {
                 n: number | null;
             };
             const now = Math.max(Date.now(), (last.n ?? 0) + 1);
-            this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,related_task_id,model,effort,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)")
-                .run(id, input.clientMessageId, conv.id, title, text, JSON.stringify(attachments), related, frozen.model, frozen.effort, now);
+            this.db.prepare("INSERT INTO tasks (id,client_message_id,conversation_id,title,input_text,attachments_json,related_task_id,model,effort,created_at,client_platform) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+                .run(id, input.clientMessageId, conv.id, title, text, JSON.stringify(attachments), related, frozen.model, frozen.effort, now, input.platform && PLATFORMS.has(input.platform) ? input.platform : null);
             if (related) this.db.prepare("UPDATE tasks SET execution_conversation_id=? WHERE id=?").run(this.executor(this.get(related)!), id);
             this.db.exec("COMMIT");
         }
@@ -1208,6 +1222,7 @@ export class TaskService {
                 ...(continuation ? [continuation] : []),
                 ...(row.schedule_id ? [this.scheduledRunNote(row)] : []),
                 `The user's current time: ${describeNow(Date.now(), this.cfg.browser.timezone)} (${this.cfg.browser.timezone}).`,
+                ...(() => { const brief = this.envBriefFor(row); return brief ? [brief] : []; })(),
                 ...(() => { const note = this.clawpagesNote(row); return note ? [note] : []; })(),
                 ...(() => { const note = this.widgetsNote(row); return note ? [note] : []; })(),
                 "The user's task this time:", this.taskContext(row),

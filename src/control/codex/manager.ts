@@ -19,6 +19,7 @@ import { PHONE_POLICY } from "../phone.js";
 import { USER_BROWSER_POLICY } from "../userBrowser.js";
 import { MAC_SHELL_POLICY } from "../macShell.js";
 import { IOS_POLICY } from "../iosDevice.js";
+import { ENV_POLICY } from "../envs/policy.js";
 import { EXPERIENCE_POLICY } from "./experience.js";
 import { SCHEDULE_POLICY } from "../scheduleTool.js";
 import { TASK_KB_POLICY } from "../taskKb/gateway.js";
@@ -1329,7 +1330,7 @@ export class AgentManager {
   #threadSettings(conversation: ConversationRow): { developerInstructions: string; browserTask: BrowserTask | undefined } {
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.taskKb ? TASK_KB_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.tts ? TTS_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.macNative ? PHONE_POLICY : "", this.#cfg.macNative && this.#tabs ? USER_BROWSER_POLICY : "", this.#cfg.macNative ? MAC_SHELL_POLICY : "", this.#cfg.ios ? IOS_POLICY : ""].filter(Boolean);
+    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.taskKb ? TASK_KB_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.tts ? TTS_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.macNative ? PHONE_POLICY : "", this.#cfg.macNative && this.#tabs ? USER_BROWSER_POLICY : "", this.#cfg.macNative ? MAC_SHELL_POLICY : "", this.#cfg.ios ? IOS_POLICY : "", this.#cfg.env ? ENV_POLICY : ""].filter(Boolean);
     const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.

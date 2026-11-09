@@ -19,6 +19,8 @@ import {UserBrowserGateway} from "./userBrowser.js";
 import {MacShellGateway} from "./macShell.js";
 import {MacNativeGateway} from "./macNative.js";
 import {IosDeviceGateway} from "./iosDevice.js";
+import {EnvRegistry} from "./envs/registry.js";
+import {EnvGateway, envFiles} from "./envs/gateway.js";
 import {DeviceLinks} from "./deviceLink.js";
 import {ScheduleGateway} from "./scheduleTool.js";
 import {TaskKbGateway} from "./taskKb/gateway.js";
@@ -573,15 +575,23 @@ async function main(): Promise<void> {
   // The executor reaches all three as one MCP server, aio_mac_native.
   const macNative=new MacNativeGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,phone,browser:userBrowser,shell:macShell});
-  macNative.provision(ctx.cfg);
   // The iPhone app links itself to the account signed in on it: its photos, reminders and calendar, as aio_ios.
   const ios=new IosDeviceGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
     filesFor:async id=>sandboxImageFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
-  ios.provision(ctx.cfg);
   ctx.ios=ios;
+  // Every execution environment (docs/EXEC-ENVS.md): the account's devices by what each can do, behind one server, aio_env.
+  // With PA_EXEC_ENVS on it stands in for aio_mac_native and aio_ios, whose devices it also reads (envs/legacy.ts).
+  const envRegistry=new EnvRegistry({links:deviceLinks,log:ctx.log,phone,browser:userBrowser,shell:macShell});
+  ctx.envs=envRegistry;
+  const envs=new EnvGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,registry:envRegistry,
+    usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,workspace:ctx.cfg.sandbox.containerWorkspaceDir,
+    filesFor:async id=>envFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
+  if(ctx.cfg.execEnvs){envs.provision(ctx.cfg);ctx.tasks.setEnvs(id=>envRegistry.snapshot(id));}
+  else{macNative.provision(ctx.cfg);ios.provision(ctx.cfg);}
   // A first link gives the account's runtime the Mac (or iPhone) tools; removing the last one takes them away.
-  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{macNative.refresh(rt.cfg);ios.refresh(rt.cfg);
+  // (aio_env is always there, so with the environments on nothing changes.)
+  deviceLinks.onAccountChange=id=>void (id===ctx.cfg.runtimeUserId?Promise.resolve(ctx):ctx.runtimeForUser!(id)).then(rt=>{if(rt.cfg.execEnvs)return;macNative.refresh(rt.cfg);ios.refresh(rt.cfg);
     // Its sandbox Codex allows only the tool servers its policy listed when it started: list them anew, then restart it once idle.
     void rt.container.enforceCodexIsolation().catch(err=>ctx.log.warn("sandbox tool policy not rewritten",{error:err instanceof Error?err.message:String(err)})).finally(()=>rt.agent.reloadTools());},
     err=>ctx.log.warn("Mac tools not refreshed",{error:err instanceof Error?err.message:String(err)}));
@@ -610,7 +620,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios,envs);
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`,apns:loadApns(ctx.cfg.apns)});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);

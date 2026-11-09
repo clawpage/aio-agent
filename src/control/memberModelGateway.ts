@@ -13,6 +13,7 @@ import type {KbGateway} from './kb.js';
 import type {HaGateway} from './ha.js';
 import type {MacNativeGateway} from './macNative.js';
 import type {IosDeviceGateway} from './iosDevice.js';
+import type {EnvGateway} from './envs/gateway.js';
 import type {ScheduleGateway} from './scheduleTool.js';
 import type {TaskKbGateway} from './taskKb/gateway.js';
 import type {BrowserGateway} from './browser/gateway.js';
@@ -103,7 +104,7 @@ export class MemberModelGateway {
   private server:http.Server|null=null;
   /** Today's use of a member's daily tokens (src/control/quota.ts); once used up, nothing more reaches a model. */
   quota?:(userId:string)=>Promise<QuotaStatus|null>;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway,private ios?:IosDeviceGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway,private ios?:IosDeviceGateway,private envs?:EnvGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -124,10 +125,16 @@ export class MemberModelGateway {
     this.image?.provision(cfg);
     this.tts?.provision(cfg);
     this.browser?.provision(cfg);
-    // A member's own Mac (its phone, the AI's Chrome, its terminal); never another account's.
-    this.macNative?.provision(cfg);
-    // Likewise its own iPhone.
-    this.ios?.provision(cfg);
+    if(cfg.execEnvs){
+      // Every device of the account through aio_env (docs/EXEC-ENVS.md), in place of the per-device servers.
+      delete cfg.macNative;delete cfg.ios;
+      this.envs?.provision(cfg);
+    }else{
+      // A member's own Mac (its phone, the AI's Chrome, its terminal); never another account's.
+      this.macNative?.provision(cfg);
+      // Likewise its own iPhone.
+      this.ios?.provision(cfg);
+    }
     if(cfg.memberModel===MEMBER_GPT_MODEL)this.gptUsers.add(cfg.runtimeUserId!);else this.gptUsers.delete(cfg.runtimeUserId!);
     if(cfg.memberModel!==MEMBER_CLAUDE_MODEL){this.claudeModels.delete(cfg.runtimeUserId!);return;}
     const claudeSecret=path.join(cfg.dataDir,'claude.env');
@@ -156,6 +163,7 @@ export class MemberModelGateway {
       // A runtime holds a Mac token only for a Mac its own account linked.
       if(this.macNative?.owns(req.url)){await this.macNative.handle(req,res);return;}
       if(this.ios?.owns(req.url)){await this.ios.handle(req,res);return;}
+      if(this.envs?.owns(req.url)){await this.envs.handle(req,res);return;}
       if(this.schedule&&(req.url??'').startsWith('/schedule/')){await this.schedule.handle(req,res);return;}
       if(this.taskKb&&(req.url??'').startsWith('/task-kb/')){await this.taskKb.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}

@@ -30,9 +30,9 @@ const MAX_FRAME = 32 * 1024 * 1024;
 const PING_MS = 25_000;
 const NAME_MAX = 80;
 
-/** What dialed in: the Mac app (its phones, Chrome and terminal) or the iPhone app (its photos, reminders and calendar). */
-export type DeviceKind = "mac" | "ios";
-export const DEVICE_KINDS: readonly DeviceKind[] = ["mac", "ios"];
+/** What dialed in: the Mac app (its phones, Chrome and terminal), the iPhone app or the Android app (docs/EXEC-ENVS.md). */
+export type DeviceKind = "mac" | "ios" | "android";
+export const DEVICE_KINDS: readonly DeviceKind[] = ["mac", "ios", "android"];
 
 export interface DeviceLinkInfo {
   id: string;
@@ -67,6 +67,8 @@ export class TunnelChannel extends EventEmitter {
 }
 
 export class Tunnel {
+  /** What the device says unasked (`{ t: "event", name, data }`): its environments changed, say (envs/registry.ts). */
+  readonly events = new EventEmitter();
   #next = 1;
   #pending = new Map<number, { resolve: (r: TunnelResponse) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
   #channels = new Map<number, TunnelChannel>();
@@ -135,6 +137,10 @@ export class Tunnel {
     } catch {
       return;
     }
+    if (msg.t === "event" && typeof (msg as { name?: unknown }).name === "string") {
+      this.events.emit("event", (msg as { name: string }).name, (msg as { data?: unknown }).data);
+      return;
+    }
     if (msg.t === "res" && typeof msg.id === "number") {
       const pending = this.#pending.get(msg.id);
       if (!pending) return;
@@ -176,6 +182,7 @@ const hash = (token: string) => createHash("sha256").update(token).digest("hex")
 export class DeviceLinks {
   #wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME });
   #tunnels = new Map<string, Tunnel>();
+  #watchers = new Set<(tunnel: Tunnel, online: boolean) => void>();
   #log: Logger;
   /** Told when an account's first link of a kind appears or its last one goes, so its runtime gains or loses the tools. */
   onAccountChange?: (ownerId: string) => void;
@@ -221,6 +228,23 @@ export class DeviceLinks {
     return best;
   }
 
+  /** Every online device of an account, of every kind. */
+  tunnelsFor(ownerId: string): Tunnel[] {
+    return [...this.#tunnels.values()].filter((t) => t.ownerId === ownerId && t.alive);
+  }
+
+  /** Told of each device that comes online or goes; the returned function stops it. */
+  watch(fn: (tunnel: Tunnel, online: boolean) => void): () => void {
+    this.#watchers.add(fn);
+    return () => this.#watchers.delete(fn);
+  }
+
+  #tell(tunnel: Tunnel, online: boolean): void {
+    for (const fn of this.#watchers) {
+      try { fn(tunnel, online); } catch (err) { this.#log.warn("device link watcher failed", { error: err instanceof Error ? err.message : String(err) }); }
+    }
+  }
+
   ownsUpgrade(req: http.IncomingMessage): boolean {
     return (req.url ?? "").split("?")[0] === DEVICE_LINK_PATH;
   }
@@ -243,6 +267,7 @@ export class DeviceLinks {
       const seen = () => this.db.prepare("UPDATE device_links SET last_seen_at=?" + (name ? ",name=?" : "") + " WHERE id=?").run(...(name ? [Date.now(), name, row.id] : [Date.now(), row.id]));
       seen();
       this.#log.info("device link online", { link: row.id, kind: row.kind });
+      this.#tell(tunnel, true);
       let alive = true;
       ws.on("pong", () => { alive = true; });
       const ping = setInterval(() => {
@@ -255,6 +280,7 @@ export class DeviceLinks {
         if (this.#tunnels.get(row.id) === tunnel) this.#tunnels.delete(row.id);
         try { seen(); } catch { /* link revoked meanwhile */ }
         this.#log.info("device link offline", { link: row.id });
+        this.#tell(tunnel, false);
       });
       ws.on("error", () => ws.terminate());
     });

@@ -1164,6 +1164,15 @@ print("venv" if venv_python else "novenv")
     return { bytes, contentType, etag };
   }
 
+  /** A workspace file's bytes, whatever it is, for aio_env to hand to a device (envs/gateway.ts); at most `limit` bytes. */
+  async fileBytes(validatedPath: string, limit: number): Promise<Buffer> {
+    const stat = await this.stat(validatedPath);
+    if (!stat.exists) throw new DocumentError("not_found", t().documents.notFound, 404);
+    if (!stat.isFile) throw new DocumentError("not_a_file", t().documents.notAFile, 400);
+    if (stat.size > limit) throw new DocumentError("too_large", `larger than ${formatBytes(limit)}`, 413);
+    return this.#fetchSandboxFile(stat.realPath);
+  }
+
   /**
    * A web picture a message shows. The account's own sandbox downloads it (it can
    * reach the web anyway, so the control plane gains no fetch-anything ability),

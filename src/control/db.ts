@@ -593,6 +593,8 @@ END;`);
   if (!taskColumns.some(c => c.name === "execution_conversation_id")) db.exec("ALTER TABLE tasks ADD COLUMN execution_conversation_id TEXT REFERENCES conversations(id)");
   if (!taskColumns.some(c => c.name === "merged_into")) db.exec("ALTER TABLE tasks ADD COLUMN merged_into TEXT REFERENCES tasks(id)");
   if (!taskColumns.some(c => c.name === "schedule_id")) db.exec("ALTER TABLE tasks ADD COLUMN schedule_id TEXT");
+  // The console the message was typed in (x-client-platform: ios, android, mac, pwa, web), for the turn's environment brief (envs/policy.ts).
+  if (!taskColumns.some(c => c.name === "client_platform")) db.exec("ALTER TABLE tasks ADD COLUMN client_platform TEXT");
   const scheduleColumns = db.prepare("PRAGMA table_info(schedules)").all() as Array<{ name: string }>;
   if (!scheduleColumns.some(c => c.name === "builtin")) db.exec("ALTER TABLE schedules ADD COLUMN builtin TEXT");
   // A schedule's condition (scheduleCondition.ts) and how its last check went.
@@ -601,9 +603,20 @@ END;`);
   const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
   if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
   // Where a claim's evidence came from: a task (the original), or in a shared library also a member's own words.
-  // What a device link is: the Mac app (its phones, Chrome, terminal) or the iPhone app (iosDevice.ts).
+  // What a device link is: the Mac app (its phones, Chrome, terminal), the iPhone app (iosDevice.ts) or the Android app (docs/EXEC-ENVS.md).
   const linkColumns = db.prepare("PRAGMA table_info(device_links)").all() as Array<{ name: string }>;
-  if (!linkColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE device_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'mac' CHECK (kind IN ('mac','ios'))");
+  if (!linkColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE device_links ADD COLUMN kind TEXT NOT NULL DEFAULT 'mac' CHECK (kind IN ('mac','ios','android'))");
+  // A table from before Android links: SQLite cannot change a CHECK, so the table is copied into one that allows it.
+  const linkSql = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='device_links'").get() as { sql: string } | undefined)?.sql ?? "";
+  if (linkSql.includes("CHECK (kind IN ('mac','ios'))")) {
+    db.exec(`BEGIN;
+      CREATE TABLE device_links_android (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES owners(id), token_hash TEXT NOT NULL UNIQUE, name TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, last_seen_at INTEGER, kind TEXT NOT NULL DEFAULT 'mac' CHECK (kind IN ('mac','ios','android')));
+      INSERT INTO device_links_android (id,owner_id,token_hash,name,created_at,last_seen_at,kind) SELECT id,owner_id,token_hash,name,created_at,last_seen_at,kind FROM device_links;
+      DROP TABLE device_links;
+      ALTER TABLE device_links_android RENAME TO device_links;
+      CREATE INDEX IF NOT EXISTS idx_device_links_owner ON device_links(owner_id);
+      COMMIT;`);
+  }
   const kbSourceColumns = db.prepare("PRAGMA table_info(kb_sources)").all() as Array<{ name: string }>;
   if (!kbSourceColumns.some(c => c.name === "kind")) db.exec("ALTER TABLE kb_sources ADD COLUMN kind TEXT NOT NULL DEFAULT 'task'");
   if (!kbSourceColumns.some(c => c.name === "contributor")) db.exec("ALTER TABLE kb_sources ADD COLUMN contributor TEXT");
