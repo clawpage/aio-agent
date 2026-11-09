@@ -132,6 +132,15 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     expect(JSON.stringify(requests.at(-1).system)).not.toContain("<names>");
     expect(JSON.stringify(requests.at(-1).system)).not.toContain("<terms>");
 
+    // Every signed-in account is served here, never by its own runtime (a member's holds no Claude credential):
+    // members' voice input is polished the same way.
+    const runtimes: string[] = [];
+    polishing.ctx.runtimeForUser = async (id: string) => { runtimes.push(id); throw new Error("not a member runtime's to serve"); };
+    try {
+      expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toMatchObject({ text: "打开走廊的灯。", polished: true });
+      expect(runtimes).toEqual([]);
+    } finally { delete polishing.ctx.runtimeForUser; }
+
     // The speech server's vocabulary goes to the polisher; anything but words is dropped.
     answer = { status: 200, text: "帮我去露露联选裤子", words: ["lululemon", "Costco", 42, null] };
     await post(polishing, { audioBase64: recording.toString("base64") });
@@ -140,7 +149,7 @@ it("polishes what was heard with the dictation model, and falls back to it as he
     // Nothing heard: nothing to polish.
     answer = { status: 200, text: "" };
     expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toMatchObject({ text: "", polished: false });
-    expect(requests).toHaveLength(2);
+    expect(requests).toHaveLength(3);
 
     fail = true;
     answer = { status: 200, text: "你好世界" };
