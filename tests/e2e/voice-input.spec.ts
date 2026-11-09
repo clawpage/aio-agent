@@ -6,16 +6,19 @@ test.use({ launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake
 
 async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null } = {}) {
   const posted: Buffer[] = [];
+  const warms: number[] = [], timings: Record<string, unknown>[] = [];
   await mockConsole(page, { conversations: [] });
+  await page.route(url => url.pathname === "/api/asr/warm", r => { warms.push(Date.now()); return r.fulfill({ status: 204 }); });
+  await page.route(url => url.pathname === "/api/asr/timing", r => { timings.push(r.request().postDataJSON()); return r.fulfill({ status: 204 }); });
   await page.route("**/api/main*", r => r.fulfill({ json: { mode: "tasks", tasks: [], nextBefore: null } }));
   await page.route(url => url.pathname === "/api/asr", async r => {
     if (r.request().method() === "GET") return r.fulfill({ json: { enabled: opts.enabled ?? true, ...(opts.locales === null ? {} : { locales: opts.locales ?? ["zh-CN", "zh-TW", "en"] }) } });
     posted.push(Buffer.from((r.request().postDataJSON() as { audioBase64: string }).audioBase64, "base64"));
-    await r.fulfill({ json: { text: opts.heard ?? "打开走廊灯。" } });
+    await r.fulfill({ json: { text: opts.heard ?? "打开走廊灯。", ref: "ref-1" } });
   });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
-  return posted;
+  return Object.assign(posted, { warms, timings });
 }
 
 test("records from the microphone, sends 16 kHz mono WAV and adds what was said to the draft", async ({ page }, info) => {
@@ -52,6 +55,10 @@ test("records from the microphone, sends 16 kHz mono WAV and adds what was said 
   let peak = 0;
   for (let i = 44; i < wav.length; i += 2) peak = Math.max(peak, Math.abs(wav.readInt16LE(i)));
   expect(peak).toBeGreaterThan(1000);
+  // The speech server is woken as recording starts, and the console reports its side of the timing.
+  expect(posted.warms.length).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => posted.timings.length).toBe(1);
+  expect(posted.timings[0]).toMatchObject({ ref: "ref-1", prepareMs: expect.any(Number), roundTripMs: expect.any(Number) });
   await page.screenshot({ path: info.outputPath("transcribed.png") });
 });
 

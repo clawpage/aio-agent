@@ -12,7 +12,8 @@ export interface VoiceRecord {
   /** What the console says recorded it: the microphone's name, the ones it could see, the hardware rate. */
   microphone: { used: string; inputs: string[]; rate: number | null } | null;
   audio: Buffer;
-  asr: { url: string; model: string | null; ms: number; text: string; raw: string | null } | null;
+  /** `idleMs`: how long the speech server had been idle before it (null: first since the control plane started). */
+  asr: { url: string; model: string | null; ms: number; idleMs?: number | null; text: string; raw: string | null } | null;
   polish: { model: string; effort: string; ms: number; polished: boolean; text: string } | null;
   error: string | null;
 }
@@ -56,6 +57,19 @@ export class VoiceLog {
     } catch (err) {
       this.log.warn("voice log not written", { error: err instanceof Error ? err.message : String(err) });
       return null;
+    }
+  }
+
+  /** Adds fields to a kept record (`id` as `record` returned it), such as the console's own timings. */
+  annotate(id: string, fields: Record<string, unknown>): void {
+    const [day, name, ...rest] = id.split("/");
+    if (!day || !DAY.test(day) || !name || rest.length || !/^[\w-]+$/.test(name)) return;
+    const file = path.join(this.dir, day, `${name}.json`);
+    try {
+      const meta = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+      fs.writeFileSync(file, JSON.stringify({ ...meta, ...fields }, null, 2) + "\n", { mode: 0o600 });
+    } catch (err) {
+      this.log.warn("voice log not annotated", { error: err instanceof Error ? err.message : String(err) });
     }
   }
 

@@ -355,8 +355,13 @@ export const api = {
   transcribe: (wav: Uint8Array, microphone?: import("./voice").MicrophoneInfo) => {
     let binary = "";
     for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));
-    return request<{ text: string }>("/api/asr", { method: "POST", body: { audioBase64: btoa(binary), microphone } });
+    return request<{ text: string; ref?: string }>("/api/asr", { method: "POST", body: { audioBase64: btoa(binary), microphone } });
   },
+  /** Wakes the speech server while the user is talking: it is slow after even a few seconds idle. */
+  asrWarm: () => request<void>("/api/asr/warm", { method: "POST", body: {} }),
+  /** The console's side of how long a voice input took, under the `ref` its text came with. */
+  asrTiming: (body: { ref: string; prepareMs: number; roundTripMs: number }) =>
+    request<void>("/api/asr/timing", { method: "POST", body }),
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 
   ticket: (next = "/") => request<{ ticket: string; origin: string; url: string; expiresAt: number }>("/api/workspace/ticket", { method: "POST", body: { next } }),

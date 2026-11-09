@@ -6,6 +6,8 @@ import { locale, t } from "../i18n";
 import { haptic } from "../haptics";
 import { tapProps } from "../tap";
 
+const WARM_EVERY_MS = 4_000;
+
 /** Why the microphone would not open, in words the user can act on. */
 function micError(err: unknown): string {
   const name = err instanceof DOMException ? err.name : "";
@@ -49,7 +51,11 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     haptic("tap");
     setState("transcribing");
     try {
-      const { text } = await api.transcribe(r.stop(), r.microphone);
+      const stopped = performance.now();
+      const audio = r.stop();
+      const sent = performance.now();
+      const { text, ref } = await api.transcribe(audio, r.microphone);
+      if (ref) void api.asrTiming({ ref, prepareMs: sent - stopped, roundTripMs: performance.now() - sent }).catch(() => { /* only a measurement */ });
       if (text) callbacks.current.onText(text);
       else callbacks.current.onError(t.voice.notHeard);
     } catch (err) {
@@ -65,9 +71,14 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     if (state !== "recording") return;
     const started = Date.now();
     setSeconds(0);
+    // The speech server slows down after a few seconds idle: keep it awake while the user talks.
+    const warm = () => void api.asrWarm().catch(() => { /* an older control plane, or only a warm-up */ });
+    warm();
+    let warmed = started;
     const timer = setInterval(() => {
       const s = Math.floor((Date.now() - started) / 1000);
       setSeconds(s);
+      if (Date.now() - warmed >= WARM_EVERY_MS) { warmed = Date.now(); warm(); }
       if (s >= MAX_SECONDS) void finishRef.current();
     }, 250);
     return () => clearInterval(timer);

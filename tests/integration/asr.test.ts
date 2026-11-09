@@ -54,7 +54,7 @@ it("relays the WAV to the speech server and returns only the text", async () => 
   const res = await post(h, { audioBase64: recording.toString("base64") });
   expect(res.status).toBe(200);
   // Without the owner's Claude credential the text comes back as heard.
-  expect(await res.json()).toEqual({ text: "打开走廊灯。", polished: false });
+  expect(await res.json()).toEqual({ text: "打开走廊灯。", polished: false, ref: expect.any(String) });
   expect(received).toHaveLength(1);
   expect(received[0]!.type).toBe("audio/wav");
   expect(received[0]!.body.equals(recording)).toBe(true);
@@ -64,6 +64,22 @@ it("relays the WAV to the speech server and returns only the text", async () => 
   expect(recording.readUInt16LE(34)).toBe(16);
   expect(recording.readUInt32LE(24)).toBe(16_000);
   expect(recording.readUInt32LE(40)).toBe(3200);
+});
+
+it("wakes the speech server with a moment of silence while the user talks, not more than once in two seconds", async () => {
+  received = [];
+  answer = { status: 200, text: "" };
+  const { cookie, csrf } = await login(h);
+  const warm = () => h.request("/api/asr/warm", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: "{}" });
+  // The last request was the test above, under two seconds ago: no need.
+  await new Promise(r => setTimeout(r, 2_100));
+  expect((await warm()).status).toBe(204);
+  expect((await warm()).status).toBe(204);
+  await expect.poll(() => received.length).toBe(1);
+  expect(received[0]!.type).toBe("audio/wav");
+  expect(received[0]!.body.toString("ascii", 0, 4)).toBe("RIFF");
+  expect(received[0]!.body.readUInt32LE(40)).toBe(16_000);   // half a second at 16 kHz
+  expect((await h.request("/api/asr/warm", { method: "POST" })).status).toBe(401);
 });
 
 it("refuses what is not a WAV or is too long, and says when the speech server fails", async () => {
@@ -110,7 +126,7 @@ it("polishes what was heard with the dictation model, and falls back to it as he
   } });
   try {
     answer = { status: 200, text: "嗯打开那个走廊灯" };
-    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "打开走廊的灯。", polished: true });
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toMatchObject({ text: "打开走廊的灯。", polished: true });
     expect(requests.at(-1).model).toBe("claude-sonnet-5-5");
     expect(requests.at(-1).messages[0].content).toContain("嗯打开那个走廊灯");
     expect(JSON.stringify(requests.at(-1).system)).not.toContain("<names>");
@@ -123,12 +139,12 @@ it("polishes what was heard with the dictation model, and falls back to it as he
 
     // Nothing heard: nothing to polish.
     answer = { status: 200, text: "" };
-    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "", polished: false });
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toMatchObject({ text: "", polished: false });
     expect(requests).toHaveLength(2);
 
     fail = true;
     answer = { status: 200, text: "你好世界" };
-    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toEqual({ text: "你好世界", polished: false });
+    expect(await (await post(polishing, { audioBase64: recording.toString("base64") })).json()).toMatchObject({ text: "你好世界", polished: false });
   } finally {
     await polishing.shutdown();
     model.close();
@@ -156,6 +172,17 @@ it("keeps the listed accounts' recordings with what was heard, for re-running th
     expect(fs.readFileSync(path.join(dir, heard.id.split("/")[0], `${heard.id.split("/")[1]}.wav`)).equals(recording)).toBe(true);
     expect(metas.find(m => !m.asr)).toMatchObject({ user: "owner", error: "upstream 500" });
     expect(fs.statSync(path.join(dir, day!, files[0]!)).mode & 0o777).toBe(0o600);
+
+    // The console's side of the timing joins the record, under the ref the text came with, once.
+    answer = { status: 200, text: "打开走廊灯。" };
+    const { ref } = await (await post(logging, { audioBase64: recording.toString("base64") })).json() as { ref: string };
+    const { cookie, csrf } = await login(logging);
+    const timing = (body: unknown) => logging.request("/api/asr/timing", { method: "POST", headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await timing({ ref, prepareMs: 12.4, roundTripMs: 999_999_999 })).status).toBe(204);
+    expect((await timing({ ref, prepareMs: 1, roundTripMs: 1 })).status).toBe(204);
+    const latest = fs.readdirSync(path.join(dir, day!)).filter(f => f.endsWith(".json")).map(f => JSON.parse(fs.readFileSync(path.join(dir, day!, f), "utf8"))).find(m => m.client);
+    expect(latest.client).toEqual({ prepareMs: 12, roundTripMs: null, networkMs: null });
+    expect(latest.asr.idleMs).toEqual(expect.any(Number));
   } finally {
     await logging.shutdown();
   }

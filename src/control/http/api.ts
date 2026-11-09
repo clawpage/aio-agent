@@ -634,6 +634,43 @@ export function createApiRouter(context: AppContext): Router {
   router.get("/asr", requireKind("primary"), requireSession, (_req, res) => {
     res.json({ enabled: Boolean(cfg.asrUrl), locales: ASR_LOCALES });
   });
+  // The speech server answers two to six times slower after even ten seconds idle, so
+  // while the user is talking the console asks for it to be woken (half a second of silence).
+  const silence = Buffer.alloc(44 + 16_000);
+  silence.write("RIFF", 0); silence.writeUInt32LE(36 + 16_000, 4); silence.write("WAVEfmt ", 8);
+  silence.writeUInt32LE(16, 16); silence.writeUInt16LE(1, 20); silence.writeUInt16LE(1, 22);
+  silence.writeUInt32LE(16_000, 24); silence.writeUInt32LE(32_000, 28); silence.writeUInt16LE(2, 32);
+  silence.writeUInt16LE(16, 34); silence.write("data", 36); silence.writeUInt32LE(16_000, 40);
+  let asrCalledAt = 0;
+  const callAsr = (body: Buffer, timeoutMs: number) => {
+    asrCalledAt = Date.now();
+    return fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(body), signal: AbortSignal.timeout(timeoutMs) });
+  };
+  router.post("/asr/warm", requireKind("primary"), requireSession, (_req, res) => {
+    if (cfg.asrUrl && Date.now() - asrCalledAt > 2_000) {
+      void callAsr(silence, 5_000).then(r => r.body?.cancel()).catch(() => { /* only a warm-up */ });
+    }
+    res.status(204).end();
+  });
+  /**
+   * How long a voice input took, on each side: the console reports its own
+   * part (making the WAV; sending it and waiting for the text) under the `ref`
+   * the text came with, and one log line puts it beside the server's.
+   */
+  const voiceTimings = new Map<string, { user: string; at: number; voiceId: string | null; fields: Record<string, number | null> }>();
+  router.post("/asr/timing", requireKind("primary"), requireSession, (req, res) => {
+    const entry = voiceTimings.get(typeof req.body?.ref === "string" ? req.body.ref : "");
+    const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 600_000 ? Math.round(v) : null);
+    if (entry && entry.user === getUser(db, ctxOf(req).session!.ownerId)?.username) {
+      voiceTimings.delete(req.body.ref);
+      const client = { prepareMs: ms(req.body.prepareMs), roundTripMs: ms(req.body.roundTripMs) };
+      const serverMs = entry.fields.serverMs ?? 0;
+      const networkMs = client.roundTripMs === null ? null : Math.max(0, client.roundTripMs - serverMs);
+      log.info("voice input timing", { account: entry.user, ...entry.fields, ...client, networkMs });
+      if (entry.voiceId) voiceLog.annotate(entry.voiceId, { client: { ...client, networkMs } });
+    }
+    res.status(204).end();
+  });
   router.post("/asr", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!cfg.asrUrl) { res.status(404).json({ error: "not_configured", message: t().http.voice.notConfigured }); return; }
     const audio = Buffer.from(typeof req.body?.audioBase64 === "string" ? req.body.audioBase64 : "", "base64");
@@ -649,19 +686,26 @@ export function createApiRouter(context: AppContext): Router {
       rate: typeof mic.rate === "number" && Number.isFinite(mic.rate) ? mic.rate : null,
     } : null;
     const record: Omit<VoiceRecord, "audio"> = { user: user?.username ?? "?", platform: req.get("x-client-platform") ?? null, microphone, asr: null, polish: null, error: null };
+    const received = Date.now();
+    let ref: string | null = null;
+    let answeredMs: number | null = null;
     try {
+      // How long the speech server had been idle: past about ten seconds it is slow.
+      const idleMs = asrCalledAt ? received - asrCalledAt : null;
       let started = Date.now();
-      const upstream = await fetch(cfg.asrUrl, { method: "POST", headers: { "content-type": "audio/wav" }, body: new Uint8Array(audio), signal: AbortSignal.timeout(30_000) });
+      const upstream = await callAsr(audio, 30_000);
       if (!upstream.ok) throw new Error(`upstream ${upstream.status}`);
       const json = (await upstream.json()) as { text?: unknown; raw?: unknown; model?: unknown; words?: unknown };
       const heard = typeof json.text === "string" ? json.text.trim() : "";
-      record.asr = { url: cfg.asrUrl, model: typeof json.model === "string" ? json.model : null, ms: Date.now() - started, text: heard, raw: typeof json.raw === "string" ? json.raw : null };
+      record.asr = { url: cfg.asrUrl, model: typeof json.model === "string" ? json.model : null, ms: Date.now() - started, idleMs, text: heard, raw: typeof json.raw === "string" ? json.raw : null };
       started = Date.now();
       // The speech server's vocabulary, which it may still have misheard (an older server sends none).
       const terms = Array.isArray(json.words) ? json.words.filter((w): w is string => typeof w === "string").slice(0, 200) : [];
       const out = heard ? await dictation.polish(heard, { names: kbReader(user), terms }) : { text: "", polished: false };
       if (heard) record.polish = { model: cfg.polishModel, effort: cfg.polishEffort, ms: Date.now() - started, ...out };
-      res.json(out);
+      ref = randomUUID();
+      answeredMs = Date.now() - received;
+      res.json({ ...out, ref });
       track(req, "voice_input", { ok: true, seconds: Math.round((audio.byteLength - 44) / 32000) });
     } catch (err) {
       record.error = err instanceof Error ? err.message : String(err);
@@ -669,7 +713,14 @@ export function createApiRouter(context: AppContext): Router {
       log.warn("asr failed", { error: record.error });
       res.status(502).json({ error: "asr_unavailable", message: t().http.voice.unavailable });
     }
-    voiceLog.record({ ...record, audio });
+    const voiceId = voiceLog.record({ ...record, audio });
+    if (ref) {
+      for (const [key, old] of voiceTimings) if (received - old.at > 5 * 60_000 || voiceTimings.size >= 100) voiceTimings.delete(key);
+      voiceTimings.set(ref, { user: record.user, at: received, voiceId, fields: {
+        seconds: Math.round(((audio.byteLength - 44) / 32_000) * 10) / 10, kb: Math.round(audio.byteLength / 1024),
+        idleMs: record.asr?.idleMs ?? null, asrMs: record.asr?.ms ?? null, polishMs: record.polish?.ms ?? null, serverMs: answeredMs,
+      } });
+    }
   }));
 
   /**

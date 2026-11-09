@@ -688,6 +688,7 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
   识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`；
   识别服务返回的 `words`（它的常用词表）一并交给润色，用来改回它仍听错的品牌、地名等，
   润色失败或未配置 Claude 凭据时返回原文（`polished:false`）。录音不进沙箱；默认不落盘。
+- **识别服务预热与耗时**：识别服务闲置十几秒后会慢 2–6 倍，所以开始录音时以及录音中每 4 秒，控制台调一次 `POST /api/asr/warm`，控制面给识别服务发半秒静音（两次之间至少隔 2 秒，失败不影响录音）。每次识别成功后返回一个 `ref`，控制台再用 `POST /api/asr/timing` 报自己这一侧的耗时（生成 WAV、上传加等待结果）；控制面把它和服务端的识别空闲时长、识别、润色、服务端合计耗时合成一行 `voice input timing` 日志（所有账号，只有数字），记了回测日志的账号也写进该条 JSON 的 `client`。
 - **回测日志**：`PA_VOICE_LOG_USERS` 列出的账号（`*` 为全部）每次语音输入在控制面数据目录 `voice-log/<日期>/` 留下录音 WAV 和同名 JSON
   （录音用的麦克风名、当时可见的全部麦克风与音频硬件采样率——蓝牙或车载麦克风通常是 16/24 kHz、手机机身麦克风是 48 kHz；识别服务地址与其报告的模型、识别原文 `text`/`raw`、润色模型/effort/结果、各段耗时、错误），文件 0600，超过 `PA_VOICE_LOG_DAYS` 天（默认 30）的日期目录在新的一天第一次写入时删除。
   `node bin/voice-replay.mjs`（compose：`docker exec aio-control-1 node bin/voice-replay.mjs`）把这些录音重新送去识别：`--asr <地址>` 可给多个做对比，
