@@ -13,25 +13,29 @@ HTTP(S) URL. The page gets no Tauri IPC. `fallback/` is only the bundled
 
 ## Offline
 
-Without a network the app still opens: the console's service worker
+Android: without a network the app still opens. The console's service worker
 (`src/ui/public/sw.js`, see "无网打开" in `docs/FEATURES.md`) serves the last console
 page that loaded, which shows "现在连不上一站" and reloads to the latest deployed UI
-as soon as the server answers. Online, the page always comes from the server.
-The shell itself bundles no UI, so a UI change still ships with the next UI deploy.
+as soon as the server answers. WebView never learns about connectivity by itself
+(`navigator.onLine` stays true, no `online` event), so `MainActivity.kt` follows the
+default network and calls `setNetworkAvailable` (needs `ACCESS_NETWORK_STATE`): the page
+says the device is offline and reloads the moment the network is back (0.1.2).
 
-- Android: WebView runs service workers as is, but never learns about connectivity by
-  itself (`navigator.onLine` stays true, no `online` event). `MainActivity.kt` follows the
-  default network and calls `setNetworkAvailable` (needs `ACCESS_NETWORK_STATE`), so the
-  page says the device is offline and reloads the moment the network is back (0.1.2).
-- iOS: WKWebView runs service workers only with App-Bound Domains. The main window
-  sets `limitNavigationsToAppBoundDomains` (`src-tauri/tauri.conf.json`), and
-  `WKAppBoundDomains` (`gen/apple/project.yml` and the generated `Info.plist`) lists
-  `localhost`, `clawpage.ai` (console and workspace), `youtube-nocookie.com` and
-  `bilibili.com` (embedded players; see `frame-src` in `src/ui/edge.mjs`). The web view
-  can no longer navigate to any other site; outside links already open in the system
-  browser. A new embedded site must be added here and needs a new app build (at most 10).
-- A device that never opened the console online has no saved page and shows the
-  web view's own error page.
+iOS: no service worker. WKWebView runs one only with App-Bound Domains, and those stop
+the agent's in-app browser (`AIBrowser.swift`) from reading pages on other sites, so the
+app has none (0.1.2 to 0.1.4 had them; do not bring `WKAppBoundDomains` or
+`limitNavigationsToAppBoundDomains` back). The console always comes from the server.
+When it cannot be loaded at launch, `ConsoleOffline.swift` covers the empty web view
+with a native card in the device's language (the same words as `auth.offline` in the
+console's locales: the device is offline, or the server cannot be reached) and opens the
+console by itself when the network returns, every 8 s while the card shows, when the app
+comes to the front, or on "Try again". To see it in the simulator, launch a debug build
+with `-AIOConsoleFailFirst 1`.
+
+The shell bundles no UI on either platform, so a UI change still ships with the next UI deploy.
+
+An Android device that never opened the console online has no saved page and shows the
+web view's own error page.
 
 Pictures in messages are likewise kept by the shared UI, not the shell: a copy in the
 web view's IndexedDB (both shells use the persistent default store) is shown at once
@@ -181,7 +185,7 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   iOS PNGs to opaque RGB (the App Store rejects alpha) and copy them over `src-tauri/icons/ios`
   and `src-tauri/icons/android`.
 
-Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, App-Bound Domains, keyboard, name and icon
+Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, the Swift sources and their project entries (`AIBrowser`, `DeviceFiles`, `ConsoleOffline`), keyboard, name and icon
 `gen/` changes above.
 
 ## Build and run

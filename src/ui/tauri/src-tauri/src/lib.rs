@@ -62,6 +62,9 @@ fn full_screen_on_ios(webview: tauri::webview::PlatformWebview) {
         // The iPhone's photos, reminders and calendar for the signed-in account's agent (DeviceTools.swift).
         let tools = AnyClass::get(c"AIODeviceTools").expect("native device tools");
         let _: () = msg_send![tools, installDeviceTools: wk];
+        // Says so when the console cannot be reached, and opens it once it can (ConsoleOffline.swift).
+        let offline = AnyClass::get(c"AIOConsoleOffline").expect("native offline card");
+        let _: () = msg_send![offline, installConsoleOffline: wk];
     }
 }
 

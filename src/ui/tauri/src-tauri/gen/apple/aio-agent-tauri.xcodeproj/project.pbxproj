@@ -17,6 +17,9 @@
 		4A79E8588FF62B162298325A /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 64D566DCD20E89D389748590 /* assets */; };
 		4B9A0BA151298A4C02F7F1D0 /* WebKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6168494EC78E45023E0D83E0 /* WebKit.framework */; };
 		72C918AE5B26B1726C6C04EA /* DeviceTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41614E503608572FAFC133CB /* DeviceTools.swift */; };
+		0AB0C0B4544C82CEFBA9204E /* DeviceFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12C5A32CDDB418E6001A16B8 /* DeviceFiles.swift */; };
+		A1C0FF11E0FF11E0A1C0FF11 /* ConsoleOffline.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FF22E0FF22E0A1C0FF22 /* ConsoleOffline.swift */; };
+		5FE970B8E27919F4AD16F5EE /* AIBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F39907FB675ED5FE3652BDBF /* AIBrowser.swift */; };
 		7628BA0BE5D50037335ABC99 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 6D193796F2576608CF7EAE2C /* Assets.xcassets */; };
 		82CF2A84D69BA899ADD0C08A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = C29252CA9769E1A1E236B231 /* PrivacyInfo.xcprivacy */; };
 		8EC7FF2B61822C90ABE7E3FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8FB3085F98BE3BB4E135B227 /* LaunchScreen.storyboard */; };
@@ -30,6 +33,9 @@
 		108D302B85C2782FFABBD299 /* es */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = es; path = es.lproj/InfoPlist.strings; sourceTree = "<group>"; };
 		344A0799E5A1397CEEB0310A /* libapp.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; path = libapp.a; sourceTree = "<group>"; };
 		41614E503608572FAFC133CB /* DeviceTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTools.swift; sourceTree = "<group>"; };
+		12C5A32CDDB418E6001A16B8 /* DeviceFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceFiles.swift; sourceTree = "<group>"; };
+		A1C0FF22E0FF22E0A1C0FF22 /* ConsoleOffline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConsoleOffline.swift; sourceTree = "<group>"; };
+		F39907FB675ED5FE3652BDBF /* AIBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIBrowser.swift; sourceTree = "<group>"; };
 		4312470B2DA91F3B9E398215 /* aio-agent-tauri_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "aio-agent-tauri_iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		4580647AEC8BE2493C9E69FC /* MetalKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = MetalKit.framework; path = System/Library/Frameworks/MetalKit.framework; sourceTree = SDKROOT; };
 		4818F11747B1F60A501FE826 /* DeviceBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceBrowser.swift; sourceTree = "<group>"; };
@@ -148,6 +154,9 @@
 			children = (
 				4818F11747B1F60A501FE826 /* DeviceBrowser.swift */,
 				41614E503608572FAFC133CB /* DeviceTools.swift */,
+				12C5A32CDDB418E6001A16B8 /* DeviceFiles.swift */,
+				A1C0FF22E0FF22E0A1C0FF22 /* ConsoleOffline.swift */,
+				F39907FB675ED5FE3652BDBF /* AIBrowser.swift */,
 				779DE91E2D7D05F7B07CA819 /* main.mm */,
 				81EFA87C923B650BB53487CB /* bindings */,
 			);
@@ -297,6 +306,9 @@
 			files = (
 				C4627A9B83620F437D087C13 /* DeviceBrowser.swift in Sources */,
 				72C918AE5B26B1726C6C04EA /* DeviceTools.swift in Sources */,
+				0AB0C0B4544C82CEFBA9204E /* DeviceFiles.swift in Sources */,
+				A1C0FF11E0FF11E0A1C0FF11 /* ConsoleOffline.swift in Sources */,
+				5FE970B8E27919F4AD16F5EE /* AIBrowser.swift in Sources */,
 				BE5C79DC2428D591BA0A1018 /* main.mm in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -1,21 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 import WebSocket from "ws";
-import { login, startHarness } from "../helpers/harness.js";
-import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
-import { DeviceLinks, DEVICE_LINK_PATH } from "../../src/control/deviceLink.js";
-import { macParts } from "../helpers/macNative.js";
-import { IosDeviceGateway } from "../../src/control/iosDevice.js";
-import { EnvRegistry } from "../../src/control/envs/registry.js";
-import { ENV_TOOLS, EnvGateway, envMcpServers, envThreadServers } from "../../src/control/envs/gateway.js";
+import { login } from "../helpers/harness.js";
+import { startEnvWorld, waitFor } from "../helpers/envs.js";
+import type { EnvRegistry } from "../../src/control/envs/registry.js";
+import { ENV_TOOLS, envMcpServers, envThreadServers } from "../../src/control/envs/gateway.js";
 import { ENV_POLICY, envBrief } from "../../src/control/envs/policy.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { memberConfig } from "../../src/control/tenants.js";
-import { createMember } from "../../src/control/auth/owner.js";
-import { handleUpgrade } from "../../src/control/http/server.js";
-import { Logger } from "../../src/common/logger.js";
 
 /**
  * The execution environments end to end (docs/EXEC-ENVS.md): stand-ins for every kind of device dial
@@ -112,97 +103,30 @@ function androidApp(url: string, token: string, build: "play" | "apk") {
   });
 }
 
-let h: Awaited<ReturnType<typeof startHarness>>;
-let gateway: MemberModelGateway;
-let links: DeviceLinks;
-let envs: EnvGateway;
+let world: Awaited<ReturnType<typeof startEnvWorld>>;
+let h: typeof world.h;
+let gateway: typeof world.gateway;
 let registry: EnvRegistry;
-let saved: Map<string, { userId: string; bytes: Buffer }>;
-let devices: WebSocket[];
+let saved: typeof world.saved;
 let url: string;
-
-async function signIn(username: string) {
-  await createMember(h.ctx.db, username, `${username}-password-123`);
-  h.ctx.db.prepare("DELETE FROM login_failures").run();
-  const res = await h.request("/api/auth/login", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username, password: `${username}-password-123` }) });
-  const cookie = (res.headers.getSetCookie?.() ?? []).map((c) => c.split(";")[0]).join("; ");
-  const csrf = /pa_csrf=([^;]+)/.exec(cookie)?.[1] ?? "";
-  const id = (h.ctx.db.prepare("SELECT id FROM owners WHERE username=?").get(username) as { id: string }).id;
-  return { cookie, csrf, id, headers: { cookie, "x-csrf-token": csrf, "content-type": "application/json" } };
-}
-
-/** A device link of `kind` for the account, as the app asks for it; its token. */
-async function link(who: { headers: Record<string, string> }, kind: "mac" | "ios" | "android", name: string): Promise<string> {
-  const res = await h.request("/api/device-links", { method: "POST", headers: who.headers, body: JSON.stringify({ name, kind }) });
-  expect(res.status).toBe(200);
-  return ((await res.json()) as { token: string }).token;
-}
-
-/** An account's runtime with the execution environments on (PA_EXEC_ENVS=1), provisioned on the member gateway. */
-function runtimeFor(userId: string, port: number) {
-  const runtime = memberConfig({ ...h.ctx.cfg, execEnvs: true }, userId, port);
-  gateway.provision(runtime);
-  return runtime;
-}
-
-/** A runtime's gateway URL as reached from here (the sandbox reaches it as host.docker.internal). */
-const local = (url: string) => url.replace(/^http:\/\/host\.docker\.internal:\d+/, `http://127.0.0.1:${gateway.port}`);
-
-/** The account's aio_env, as its executor calls it. */
-function executor(runtime: { env?: { url: string } }) {
-  let id = 0;
-  const rpc = async (method: string, params: unknown = {}) => {
-    const res = await fetch(local(runtime.env!.url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: ++id, method, params }) });
-    return (await res.json()) as { result: any; error?: unknown };
-  };
-  const call = async (name: string, args: Record<string, unknown> = {}) => (await rpc("tools/call", { name, arguments: args })).result as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>; isError?: boolean };
-  const text = (out: { content: Array<{ type: string; text?: string }> }) => out.content.filter((c) => c.type === "text").map((c) => c.text).join("\n");
-  const list = async () => JSON.parse(text(await call("env_list"))) as { envs: Array<{ id: string; kind: string; name: string; online: boolean; foreground: boolean; capabilities: string[] }> };
-  return { rpc, call, text, list };
-}
-
-const waitFor = async <T>(probe: () => Promise<T | undefined> | T | undefined): Promise<T> => {
-  for (let i = 0; i < 200; i++) {
-    const v = await probe();
-    if (v !== undefined && v !== null && v !== false) return v as T;
-    await new Promise((r) => setTimeout(r, 25));
-  }
-  throw new Error("timed out waiting");
-};
+const signIn = (username: string) => world.signIn(username);
+const link = (who: { headers: Record<string, string> }, kind: "mac" | "ios" | "android", name: string) => world.link(who, kind, name);
+const runtimeFor = (userId: string, port: number) => world.runtimeFor(userId, port);
+const executor = (runtime: { env?: { url: string } }) => world.executor(runtime);
+const local = (address: string) => world.local(address);
 
 beforeEach(async () => {
-  h = await startHarness();
-  const log = new Logger("error", undefined, false);
-  const cfg = Object.assign(h.ctx.cfg, { memberModelPort: 0, runtimeUserId: "owner_1" });
-  const names = (id: string) => (h.ctx.db.prepare("SELECT username AS v FROM owners WHERE id=?").get(id) as { v: string } | undefined)?.v ?? null;
-  const ids = (name: string) => (h.ctx.db.prepare("SELECT id AS v FROM owners WHERE username=?").get(name) as { v: string } | undefined)?.v ?? null;
-  links = new DeviceLinks(h.ctx.db, cfg, log);
-  const mac = macParts({ cfg, log, usernameOf: names, userIdOf: ids, links });
-  saved = new Map();
-  registry = new EnvRegistry({ links, log, phone: mac.phone, browser: mac.browser, shell: mac.shell });
-  envs = new EnvGateway({ cfg, log, port: 0, usernameOf: names, userIdOf: ids, links, registry, workspace: "/home/gem/workspace",
-    filesFor: async (userId) => ({ read: async (file) => { const kept = saved.get(file); if (!kept || kept.userId !== userId) throw new Error("no such file"); return kept.bytes; }, write: async (file, bytes) => { saved.set(file, { userId, bytes: Buffer.from(bytes) }); } }) });
-  // The per-device servers of today, kept for runtimes with the environments off.
-  const ios = new IosDeviceGateway({ cfg, log, port: 0, usernameOf: names, userIdOf: ids, links, workspace: "/home/gem/workspace", filesFor: async () => ({ read: async () => { throw new Error("unused"); }, write: async () => undefined }) });
-  gateway = new MemberModelGateway(cfg, log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, mac.native, undefined, undefined, ios, envs);
-  await gateway.start();
-  Object.assign(h.ctx, { deviceLinks: links, envs: registry });
-  h.server.removeAllListeners("upgrade");
-  h.server.on("upgrade", (req, socket, head) => links.ownsUpgrade(req) ? links.handleUpgrade(req, socket, head) : handleUpgrade(h.ctx, req, socket, head));
-  url = `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`;
-  devices = [];
+  world = await startEnvWorld();
+  ({ h, gateway, registry, saved, url } = world);
 });
 
 afterEach(async () => {
-  for (const ws of devices) ws.terminate();
-  links.close();
-  gateway.close();
-  await h.shutdown();
+  await world.close();
 });
 
 /** Connect a stand-in and wait until the registry has read what it offers. */
 async function connect(stand: ReturnType<typeof device>, userId: string, count: number) {
-  devices.push(stand.ws);
+  world.devices.push(stand.ws);
   await stand.opened;
   await waitFor(async () => (await registry.list(userId)).filter((e) => e.kind !== "sandbox" && e.online).length >= count || undefined);
   return stand;

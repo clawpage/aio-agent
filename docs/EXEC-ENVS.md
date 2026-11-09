@@ -88,6 +88,18 @@ their capabilities, and where the message came from (the console's `x-client-pla
 3. A device going offline falls back to the sandbox where the work allows; otherwise the agent says in
    one sentence what the person should do (open the app, keep it on screen).
 
+## The iPhone app's browser
+
+The agent's pages open in the app's own web view (`AIBrowser.swift`), a panel the person sees and can
+use. It reads and acts on a page from an isolated script world (`WKContentWorld`): element references
+live there, so the page sees no attribute, node or global of ours (the simulator test watches a page
+with a `MutationObserver` to hold this). Clicks are script clicks (`isTrusted` is false) and typing
+sets the value and fires the input events; a site that insists on a real touch, a captcha or a login
+goes to the person with `browser_request_human`, who acts in the same panel. A click that would
+submit an order or a payment waits for the person's confirmation on the device. The app has no
+App-Bound Domains, which would confine these scripts to our own domains (so no service worker on
+iOS: see "Offline" in `src/ui/tauri/README.md`).
+
 ## Distribution
 
 - **App Store iOS app** and **Google Play Android app**: `browser`, `files`, `photos`, `calendar` (and
@@ -114,5 +126,5 @@ speaking protocol 1 are live and the device-link log shows no old-protocol devic
 
 - `tests/integration/exec-envs.test.ts`: the control plane end to end with stand-in devices over a real
   device-link socket (new and old iPhone, old Mac with a USB phone, a Play-build and an APK Android).
-- `tests/devices/ios.e2e.mjs`: the real iPhone app in the simulator against a local control plane.
+- `tests/devices/ios.e2e.test.ts`: the real iPhone app in the simulator against a local control plane.
 - `tests/devices/android.e2e.mjs`: the real Android app in the emulator, both builds.

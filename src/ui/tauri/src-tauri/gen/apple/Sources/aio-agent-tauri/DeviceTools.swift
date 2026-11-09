@@ -15,7 +15,7 @@ import Security
 // state as JSON). The token is in the Keychain; the account it belongs to is kept beside it, and a
 // console signed in as anyone else makes the app forget both and turn every ability off.
 
-private let consoleHost = "agent.clawpage.ai"
+let consoleHost = "agent.clawpage.ai"
 private let linkURL = URL(string: "wss://agent.clawpage.ai/api/device-link/connect")!
 private let keychainService = "ai.clawpage.agent.device-tools"
 private let defaultsPrefix = "aio.deviceTools."
@@ -25,7 +25,7 @@ private let maxPhotoBytes = 4 * 1024 * 1024
 
 private enum Ability: String, CaseIterable { case photos, reminders, calendar }
 
-private func trace(_ message: String) { NSLog("[aio-device-tools] %@", message) }
+func trace(_ message: String) { NSLog("[aio-device-tools] %@", message) }
 
 private func json(_ value: Any) -> String {
     guard JSONSerialization.isValidJSONObject(value),
@@ -424,6 +424,70 @@ private enum Tools {
     }
 }
 
+// MARK: - This iPhone as an execution environment (docs/EXEC-ENVS.md, protocol 1)
+
+/**
+ * What the agent may do here and how a call reaches it: the app's own browser (AIBrowser.swift) and folder
+ * (DeviceFiles.swift) whenever the iPhone is linked, and the abilities the person turned on and iOS allows.
+ * Answered at `/env/manifest` and `/env/call`; a change is told at once as a `manifest` event.
+ */
+private enum Environment {
+    static let deviceId = UIDevice.current.identifierForVendor?.uuidString ?? "iphone"
+
+    static func manifest() -> [String: Any] {
+        let onScreen: Bool = Thread.isMainThread ? UIApplication.shared.applicationState == .active : DispatchQueue.main.sync { UIApplication.shared.applicationState == .active }
+        let abilities = Ability.allCases.filter { Store.enabled($0) && Permission.usable($0) }.map(\.rawValue)
+        return ["protocol": 1, "envs": [["deviceId": deviceId, "kind": "ios", "name": UIDevice.current.name, "capabilities": ["browser", "files"] + abilities, "foreground": onScreen]]]
+    }
+
+    /** One call (off the main queue); the browser's tools run on the main queue and are waited for here. */
+    static func call(_ body: [String: Any]) -> [String: Any] {
+        guard body["env"] as? String == deviceId, let tool = body["tool"] as? String else { return ["ok": false, "code": "not_found", "message": "not this iPhone"] }
+        let args = body["arguments"] as? [String: Any] ?? [:]
+        if tool.hasPrefix("files_") {
+            do {
+                switch tool {
+                case "files_list": return ["ok": true, "result": try DeviceFiles.list(args)]
+                case "files_pull": return ["ok": true, "result": try DeviceFiles.pull(args)]
+                case "files_push": return ["ok": true, "result": try DeviceFiles.push(args)]
+                default: return ["ok": false, "code": "unknown_tool"]
+                }
+            } catch let error as FilesError {
+                return ["ok": false, "code": error.code, "message": error.message]
+            } catch {
+                return ["ok": false, "code": "failed", "message": error.localizedDescription]
+            }
+        }
+        guard tool.hasPrefix("browser_") else { return Tools.run(tool, args) }
+        let semaphore = DispatchSemaphore(value: 0)
+        var answer: [String: Any] = ["ok": false, "code": "failed", "message": "no answer"]
+        let done = { (result: Result<[String: Any], BrowserError>) in
+            switch result {
+            case .success(let value): answer = ["ok": true, "result": value]
+            case .failure(let error): answer = ["ok": false, "code": error.code, "message": error.message]
+            }
+            semaphore.signal()
+        }
+        DispatchQueue.main.async {
+            let browser = AIBrowser.shared
+            switch tool {
+            case "browser_open": browser.open(args["url"] as? String ?? "", done)
+            case "browser_read": browser.read(done)
+            case "browser_click": browser.click(args["ref"] as? String ?? "", done)
+            case "browser_type": browser.type(args["ref"] as? String ?? "", args["text"] as? String ?? "", submit: args["submit"] as? Bool ?? false, done)
+            case "browser_scroll": browser.scroll(args["direction"] as? String ?? "down", done)
+            case "browser_back": browser.back(done)
+            case "browser_screenshot": browser.screenshot(done)
+            case "browser_request_human": browser.requestHuman(args["reason"] as? String ?? "", done)
+            default: done(.failure(BrowserError(code: "unknown_tool", message: tool)))
+            }
+        }
+        // A person asked to act gets ten minutes; anything else is a page, which answers well within two.
+        _ = semaphore.wait(timeout: .now() + (tool == "browser_request_human" ? 610 : 120))
+        return answer
+    }
+}
+
 // MARK: - The socket to the control plane
 
 /** One WebSocket to the device-link endpoint, answering its `req` frames (deviceLink.ts). */
@@ -445,7 +509,9 @@ private final class Link: NSObject, URLSessionWebSocketDelegate {
         center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in self?.suspend() }
         // Not willEnterForeground: the app still counts as in the background there, and connect() waits for it.
         center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.wanted, self.task == nil else { return }
+            guard let self, self.wanted else { return }
+            // Back on screen while still connected: the agent's brief should say so now.
+            if self.task != nil { self.event("manifest", Environment.manifest()); return }
             self.retry = 1
             self.connect()
         }
@@ -477,6 +543,12 @@ private final class Link: NSObject, URLSessionWebSocketDelegate {
         state = next
         trace("link \(next)")
         onState?()
+    }
+
+    /** Something the server should know unasked (`manifest`: what this iPhone offers changed). */
+    func event(_ name: String, _ data: [String: Any]) {
+        guard state == "online", let task else { return }
+        task.send(.string(json(["t": "event", "name": name, "data": data]))) { _ in }
     }
 
     func disconnect(_ next: String) {
@@ -577,8 +649,15 @@ private final class Link: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
-    /** The two endpoints this app has; anything else is not found. */
+    /** The endpoints this app has (protocol 1, and the two it had before); anything else is not found. */
     static func answer(_ method: String, _ path: String, _ body: Data) -> (Int, [String: Any]) {
+        if method == "GET", path == "/env/manifest" { return (200, Environment.manifest()) }
+        if method == "POST", path == "/env/call", let call = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            let started = Date()
+            let answer = Environment.call(call)
+            trace("env call \(call["tool"] as? String ?? "-") ok=\(answer["ok"] as? Bool ?? false) code=\(answer["code"] as? String ?? "-") ms=\(Int(Date().timeIntervalSince(started) * 1000))")
+            return (200, answer)
+        }
         if method == "GET", path == "/ios/status" { return (200, Tools.status()) }
         guard method == "POST", path == "/ios/call",
               let call = try? JSONSerialization.jsonObject(with: body) as? [String: Any], let tool = call["tool"] as? String else { return (404, [:]) }
@@ -630,6 +709,7 @@ private final class DeviceToolsHandler: NSObject, WKScriptMessageHandlerWithRepl
         case "account":
             // The console says who is signed in (nobody: null). Another account makes this iPhone forget the link.
             let account = body["account"] as? String
+            if DeviceTools.testLink { reply(); return }
             if let stored = Store.account, let account, stored != account {
                 link.wanted = false
                 Store.forget()
@@ -653,11 +733,13 @@ private final class DeviceToolsHandler: NSObject, WKScriptMessageHandlerWithRepl
             guard let ability = Ability(rawValue: body["ability"] as? String ?? "") else { replyHandler(nil, "invalid"); return }
             Permission.request(ability) {
                 Store.setEnabled(ability, Permission.usable(ability))
+                self.link.event("manifest", Environment.manifest())
                 reply()
             }
         case "disable":
             guard let ability = Ability(rawValue: body["ability"] as? String ?? "") else { replyHandler(nil, "invalid"); return }
             Store.setEnabled(ability, false)
+            link.event("manifest", Environment.manifest())
             reply()
         case "settings":
             if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -671,6 +753,9 @@ private final class DeviceToolsHandler: NSObject, WKScriptMessageHandlerWithRepl
 final class DeviceTools: NSObject {
     private static var handler: DeviceToolsHandler?
 
+    /** A debug build linked from its launch arguments: the console's account does not turn that link off. */
+    fileprivate static var testLink = false
+
     @objc(installDeviceTools:)
     static func install(_ webView: WKWebView) {
         let handler = DeviceToolsHandler(webView)
@@ -683,6 +768,7 @@ final class DeviceTools: NSObject {
             Store.token = token
             Store.linkId = "debug"
             Store.account = "debug"
+            testLink = true
             for ability in Ability.allCases { Store.setEnabled(ability, Permission.usable(ability)) }
             handler.link.wanted = true
         }
