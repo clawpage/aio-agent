@@ -85,16 +85,16 @@ const DAILY_FEED = "daily_feed";
 const FEED_AT = "08:00";
 /** Minutes between accounts' feeds: member n runs n of these after the owner's 08:00. */
 const FEED_STAGGER_MINUTES = 4;
-/** The midday feed runs this long after the morning one, at the account's same minutes. */
-const FEED_MIDDAY_AFTER_MINUTES = 4 * 60;
+/** The second feed of the day runs this long after the morning one, at the account's same minutes. */
+const FEED_SECOND_AFTER_MINUTES = 6 * 60;
 const clockText = (minutes: number) => `${String(Math.floor(minutes / 60) % 24).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 /** The feed time of an account's slot (0 is the owner's 08:00). */
 export function feedTimeFor(slot: number): string {
     return clockText(8 * 60 + slot * FEED_STAGGER_MINUTES);
 }
 const clockMinutes = (at: string) => { const [h, m] = at.split(":").map(Number); return h! * 60 + m!; };
-/** The feed's two runs a day: in the morning at `at`, and at midday. */
-const feedSpec = (at: string): ScheduleSpec => ({ kind: "daily", at, times: [at, clockText(clockMinutes(at) + FEED_MIDDAY_AFTER_MINUTES)] });
+/** The feed's two runs a day: in the morning at `at`, and six hours later. */
+const feedSpec = (at: string): ScheduleSpec => ({ kind: "daily", at, times: [at, clockText(clockMinutes(at) + FEED_SECOND_AFTER_MINUTES)] });
 const FEED_SPEC = feedSpec(FEED_AT);
 /**
  * The feed's own instruction until the person words it themselves (the model reads it;
@@ -1395,19 +1395,19 @@ export class TaskService {
             return { date: date(f.created_at), topics: JSON.parse(f.topics_json) as string[], nothingToday: !!f.empty, userTasksAfter: after, ...(replies.length ? { replies } : {}) };
         });
         const asked = s && !isDefaultFeedInstruction(s.instruction) ? s.instruction.trim() : null;
-        // Which of the day's runs this is: the first is the morning feed, a later one the midday feed.
+        // Which of the day's runs this is: the first is the morning feed, a later one the afternoon feed.
         const times = (() => { const spec = s ? JSON.parse(s.spec_json) as ScheduleSpec : FEED_SPEC; return spec.times ?? [spec.at ?? FEED_AT]; })();
         const clock = clockMinutes(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(row.created_at));
-        const midday = times.length > 1 && times.slice(1).some(at => clock >= clockMinutes(at));
-        // The last push in full, so this one repeats none of it (the morning one for the midday feed, yesterday's midday one for the morning).
+        const afternoon = times.length > 1 && times.slice(1).some(at => clock >= clockMinutes(at));
+        // The last push in full, so this one repeats none of it (the morning one for the afternoon feed, yesterday's afternoon one for the morning).
         const last = s ? this.db.prepare("SELECT * FROM tasks WHERE schedule_id=? AND status='completed' AND created_at<? AND created_at>=? ORDER BY created_at DESC LIMIT 1").get(s.id, row.created_at, row.created_at - 86_400_000) as unknown as TaskRow | undefined : undefined;
         const lastPush = last && !FEED_EMPTY.test(last.result ?? "") ? { date: date(last.created_at), text: cut(this.shownResult(last), 3000) } : null;
         const memory = this.feedMemory(ownerId);
         const kept = Object.fromEntries(FEED_MEMORY_KINDS.map(k => [k, memory.filter(m => m.kind === k).map(m => ({ id: m.id, text: m.text, from: m.source === "user" ? "said by the user" : "learned by the feed", date: date(m.created_at) }))]));
         return [
-            `This is the built-in daily feed (every day at ${times.join(" and ")}; this is the ${midday ? "midday" : "morning"} run), running automatically on ${date(row.created_at)}. The user is not in the conversation right now. Your job: from all of the user's past task records, the requests they made and the things they care about, pick the 3–8 things they are most likely to be interested in right now or need reminding of, and tell them briefly, like a thoughtful personal assistant. The feed is what brings people back every day, so it must be worth opening: each item is either news about something they follow (a price that moved, an order or a date coming up, someone waiting for a reply) or something new worth their time that grows out of what they have been asking about.`,
-            midday
-                ? "This is the midday feed; the user already had the morning one (lastPush below). Bring what is new since then: changes during the morning to what they follow (prices, orders, deliveries, email that came in), news from the last few hours on their interests, and other new things from their interests that the morning did not cover, with something light and enjoyable for a lunch break. 2–5 items are enough here."
+            `This is the built-in daily feed (every day at ${times.join(" and ")}; this is the ${afternoon ? "afternoon" : "morning"} run), running automatically on ${date(row.created_at)}. The user is not in the conversation right now. Your job: from all of the user's past task records, the requests they made and the things they care about, pick the 3–8 things they are most likely to be interested in right now or need reminding of, and tell them briefly, like a thoughtful personal assistant. The feed is what brings people back every day, so it must be worth opening: each item is either news about something they follow (a price that moved, an order or a date coming up, someone waiting for a reply) or something new worth their time that grows out of what they have been asking about.`,
+            afternoon
+                ? "This is the afternoon feed; the user already had the morning one (lastPush below). Bring what is new since then: changes during the day to what they follow (prices, orders, deliveries, email that came in), news from the last few hours on their interests, things for this evening or tomorrow worth knowing now, and other new things from their interests that the morning did not cover, with something light and enjoyable for a short break. 2–5 items are enough here."
                 : "This is the morning feed: start their day. First what today holds for them (dates, appointments, deadlines, deliveries, weather that matters for their plans), then what changed overnight in what they follow, then new things from their interests.",
             "Never repeat: no item, link or topic from lastPush (the previous push, shown in full) comes again, unless it materially changed since; then say only what changed. Two pushes on the same day must read as two different sets of news. If after checking there is truly nothing new since lastPush, give fewer items rather than repeat any.",
             "What makes an item worth opening: it is specific (a name, a number, a date, a place, a price), it is new (published or changed in the last day or two, or genuinely new to them), and it fits this person, not anyone. Leave out generic tips anyone could guess, encyclopedia facts and filler. Look widely before choosing: news sites, official announcements, deal and price-history sites, event listings, and what people are discussing now in forums, Reddit, Xiaohongshu or X on their topics; check several sources per interest and keep only the best find. Put the most compelling item first: the phone notification shows the start of your reply.",
@@ -1485,7 +1485,7 @@ export class TaskService {
             timing = checked;
             said.push(`Feed time changed to ${describeSchedule(checked.spec)}`);
         } else if (args.at !== undefined && args.at !== null) {
-            // A new morning time moves the midday run with it; a feed the person made once a day stays once a day.
+            // A new morning time moves the afternoon run with it; a feed the person made once a day stays once a day.
             const twice = ((JSON.parse(s.spec_json) as ScheduleSpec).times?.length ?? 1) > 1;
             const checked = validateSchedule(twice && typeof args.at === "string" && /^\d{2}:\d{2}$/.test(args.at) ? feedSpec(args.at) : { kind: "daily", at: args.at }, now, s.timezone);
             if ("error" in checked) throw new Error(checked.error);

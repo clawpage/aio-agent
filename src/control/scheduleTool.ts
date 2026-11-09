@@ -122,7 +122,7 @@ const TOOLS = [
       type: "object",
       properties: {
         instruction: { type: "string", description: "The user's complete requirements for the daily feed (at most 1500 characters); appended to the system instructions and followed first; an empty string restores the default" },
-        at: { type: "string", description: "New morning push time HH:MM (24-hour); the midday push moves with it, 4 hours later" },
+        at: { type: "string", description: "New morning push time HH:MM (24-hour); the second push moves with it, 6 hours later" },
         times: { type: "array", items: { type: "string" }, description: "All push times of the day HH:MM (1–3), when the user wants other times or another number of pushes (e.g. [\"07:30\"] for once a day, [\"08:00\", \"12:30\"])" },
         add: {
           type: "array",
