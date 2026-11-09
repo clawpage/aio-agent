@@ -74,6 +74,8 @@ it("gives every account an image tool that draws with the control plane's own lo
     // A real photo of people is retouched with the aio-photo skill, never redrawn by the image model.
     expect(IMAGE_POLICY).toContain("never redrawn with image_generate");
     expect(IMAGE_POLICY).toContain("aio-photo skill");
+    // ...but what retouching cannot fix is not held back from the image model.
+    expect(IMAGE_POLICY).toContain("Do not hold back from image_generate on a photo");
     const tools = (await (await rpc(member.image!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toEqual(["image_generate"]);
 

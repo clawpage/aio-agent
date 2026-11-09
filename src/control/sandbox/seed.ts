@@ -3334,10 +3334,15 @@ person or child, and every further edit drifts more and leaves blotchy patches o
 3. **Keep everyone and everything of the people**: adults in the frame, hands holding the baby, props, clothes. Do not crop or change the
    framing unless asked.
 4. **When the user sends originals again or says 再来/重做/重新修, redo them from those originals.** Never copy or resend earlier results.
-5. image_generate only for: an empty background picture without people (then \`--background <that png>\`), a change to the content of
-   one part (remove a passer-by or a thing, a new sky where the original is blown out, change one object: always through markup and
-   merge below, so only that part comes from the AI), or a drawing or cartoon made from the photo when the user asks for one. Say plainly
-   what was AI-made, and still run check.
+5. **Retouching only makes things lighter, softer or another color. Anything that has to be added, removed or redrawn goes to
+   image_generate, in the first attempt**: a passer-by or a thing, a stain, scratch, crease or spot \`--heal\` does not clear, a blown-out
+   sky, a missing or wrong object, closed eyes, clothes. Use markup and merge below, so only that part comes from the AI. Do not hold
+   back: never answer such a request with retouch options alone, never decline it, and never deliver a result that still shows the flaw
+   the user asked about. If the user says a flaw is still there, the next attempt is image_generate on that part, not another retouch.
+6. image_generate on the whole photo (with it as \`reference_paths\`, no markup) when the user asks for a change to the whole picture:
+   a new scene or background the cut-out cannot do cleanly, a new pose or outfit, someone added, a drawing, cartoon or style. Deliver it,
+   say plainly that the people are AI-redrawn, and skip the face check for it. Also an empty background picture without people for
+   \`--background <that png>\`. Say plainly what was AI-made, and run check on everything merged onto the original.
 
 ## Retouch
 
@@ -3441,7 +3446,25 @@ original's.
    purpose and are left out). In the compare block \`before\` is the original; the note says what the AI changed.
 
 The AI part is drawn at about 1.5 megapixels and scaled up, so it is a little softer than the rest of a large photo: say so if it shows.
-Keep marked parts away from faces that stay; a change to a person (a face, a body) is not a retouch, say so instead.
+Keep marked parts away from faces that stay. A change the user asks for on a person (open eyes, a smile, clothes, a hand) is marked
+tightly around that part only and done the same way; say which part was AI-made.
+
+## Putting people from one photo into another (合成, 把这几个人P到那张图上, 换人)
+
+The people (and their faces) are pasted from their own photo; everything that makes a paste look pasted is image_generate's work,
+not yours. Never fix halos, white or dark edges, seams, color or light mismatch, shadows, or background text and objects the paste
+broke with your own pixel scripts (blurs, feathering, color transfer): that is what made such composites come back again and again.
+
+1. Paste the people at their place (your own script is fine for this one step: their cut-out at the right size and position).
+2. In the same attempt, before delivering, run markup on the pasted result around everything that is not the people's own pixels or
+   does not fit: every outline (hair, shoulders, arms; \`--lasso\` or a chain of \`--circle\` along it, outside the face), the background the
+   old people left or the paste covered (text, signs, edges of furniture), and the floor for contact shadows. Never mark a face.
+3. image_generate with that input and markup: "Blend the people into the scene inside the red marks: remove white or dark halos,
+   continue the background and any text naturally, match light, color and shadows to the scene. Keep the faces and everything outside
+   the marks exactly the same. Remove the red marks." Then merge onto the pasted result.
+4. Light and color of the people as a whole (still brighter or warmer than the scene): retouch the merged result with \`--local people …\`.
+5. check the faces against their original photo (\`--box\` per face), look at every outline at 100 %, then deliver. A follow-up about
+   edges, color or broken background is a new markup on the latest result and another image_generate, not a script.
 
 ## More detail (read the one that applies before you start)
 
@@ -3490,11 +3513,12 @@ block. Then one sentence on what changed. Do not show originals, cut-out preview
 
 ## Limits (say them honestly)
 
-- No reshaping (slimming, bigger eyes, a different smile): it changes who people are. Skin softening and healing small spots are the
-  only skin retouching.
+- No reshaping (slimming, bigger eyes) unless the user asks for it: it changes who people are. When asked, it is an AI change to that
+  part (markup and merge), and the user is told.
 - No straightening or perspective correction (it would break the face check against the original); say so if asked.
-- AI changes go through markup and merge only; the user is told which part was AI-made.
-- Blown-out areas (pure white sky or skin) have no detail left to recover; only an AI-made replacement changes them (rule 5).
+- AI changes go through markup and merge, or the whole photo when the user asks for that (rule 6); the user is told which part was AI-made.
+- Blown-out areas (pure white sky or skin) have no detail left to recover; an AI-made replacement does it (rule 5): offer it, or just do
+  it when the user asked for the area to be fixed.
 - The cut-out follows the people's outline; fine wisps of hair against a busy background may blur. The preview shows it.
 `;
 
@@ -3724,9 +3748,9 @@ original. [S9, S10]
 ## Stains on clothes or hats
 
 - First \`--heal\` small marks (it keeps the fabric's texture, folds, seams, printed or embroidered text).
-- A larger stain heal cannot fix: say so. Only if the user wants it, an AI patch may be made for **that object alone**
-  (crop just the stained part, ask image_generate to remove the stain keeping size and framing), aligned back and blended
-  with a soft mask that covers only the stain. Never on faces, skin, hair or hands; text and embroidery must match the
+- A larger stain heal cannot fix: remove it with image_generate in the same attempt, for **that object alone**
+  (markup around the stain, image_generate, merge; SKILL.md "Changing the content of one part"), so only the stain's
+  area is AI-made. Never on faces, skin, hair or hands; text and embroidery must match the
   original; tell the user which part is AI-made. Then run \`check\` on the final photo.
 
 ## After the user corrects you
@@ -3781,7 +3805,8 @@ darker sky; foliage is mostly yellow and green, so darken it with both, e.g. \`b
 
 Read before changing a background (\`--background smooth|studio|plain|<picture>\`) and whenever an edge, a white speck or
 a floating person needs rework. The people, expressions, hands, clothes, props and framing always come from the original;
-light and color from LightCraft; cut-outs, masks and blending may use Pillow/OpenCV. Never redraw people.
+light and color from LightCraft; cut-outs and masks may use Pillow/OpenCV. Never redraw people. A halo, seam or edge that
+one rework with the tools below does not clear is marked (markup, outside faces) and blended by image_generate, then merged.
 
 ## Keep the work in layers
 
