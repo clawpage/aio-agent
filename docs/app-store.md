@@ -22,7 +22,7 @@ iOS App 是 `src/ui/tauri` 的 Tauri 壳（见该目录 README），加载线上
 | 只支持 iPhone（`TARGETED_DEVICE_FAMILY = 1`）：不需要 iPad 截图；iPad 上以兼容模式运行 | `gen/apple/project.yml` |
 | 主屏名称与权限说明四种语言：英/西 Clawpage，中文一站；麦克风、相机、存入相册 | `gen/apple/Localization/<语言>.lproj/InfoPlist.strings` |
 | 1024 图标不透明（App Store 拒收带 alpha 的图标） | `Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png` |
-| 版本 `0.1.4`，构建号每次上传递增（`--build-number`）；改版本同时改 `project.yml` 与 `Info.plist` 里的版本号 | `tauri.conf.json` `version` |
+| 版本 `0.1.5`，构建号每次上传递增（`--build-number`）；改版本同时改 `project.yml` 与 `Info.plist` 里的版本号 | `tauri.conf.json` `version` |
 
 改 `project.yml` 后在 `gen/apple` 跑 `xcodegen generate`；重新 `tauri ios init` 会覆盖 `gen/`，以上各项要重新放回。
 
@@ -115,3 +115,12 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 构建 `0.1.4 (0.1.4.1)`，`altool` 上传成功（Delivery UUID `cf0b5795-3bdc-4713-86e2-a56c66011ca5`）。
 - Connect 新建版本 0.1.4（元数据从 0.1.3 复制），四种语言的 6.9 英寸截图换成 `scripts/store-shots.mts` 生成的五张海报，填了四语言「此版本的新增内容」。
 - 2026-11-07 提审：挂上构建 0.1.4.1，审核联系人与审核账号沿用 0.1.3（逐项回读一致），提交后状态 `WAITING_FOR_REVIEW`；审核通过后自动上架（`AFTER_APPROVAL`）。
+
+## 2026-11-09 0.1.5：执行环境与原生无网提示（TestFlight）
+
+- 原生改动：App 应答设备协议（`/env/manifest`、`/env/call`），带 AI 用的浏览器面板（`AIBrowser.swift`）和「AI Files」文件夹（`DeviceFiles.swift`）；去掉 App-Bound Domains，
+  iOS 不再用 service worker，取不到控制台时显示原生提示并自动重试（`ConsoleOffline.swift`）。见 `docs/EXEC-ENVS.md` 与 `src/ui/tauri/README.md`「Offline」。
+- 构建 `0.1.5 (0.1.5.1)`，`altool` 上传成功（Delivery UUID `6d703773-6c29-4d0c-a7f7-c81f5531c08f`），处理为 VALID 后加入外部测试组、填中英文「测试内容」并提交 Beta 审核，
+  状态 `WAITING_FOR_REVIEW`；内部测试已可安装。
+- 只在模拟器上验过（`tests/devices/ios.e2e.test.ts` 6 项、`-AIOConsoleFailFirst 1` 的无网提示）；真机的飞行模式冷启动、浏览器面板和文件夹未验。
+  服务端 `PA_EXEC_ENVS` 仍关闭，浏览器与文件在打开前不会被执行器用到。未新建 App Store 版本，未提交商店审核。
