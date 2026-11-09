@@ -180,6 +180,8 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
   const mailer = opts.skipOwner ? undefined : opts.overrides?.mailer ?? (cfg.resendApiKey ? new ResendMailer(cfg.resendApiKey) : undefined);
   if (!opts.skipOwner && !mailer) log.warn("no Resend API key: password registration does not verify the email (PA_RESEND_SECRETS_FILE)");
   const tasks = new TaskService(db, cfg, agent, codex, container, jev);
+  // A member's runtime is told this from the main database (tenants.ts); here it is the main one.
+  if (!cfg.memberRuntime) tasks.setLastOpened(() => SessionStore.lastSeen(db, cfg.runtimeUserId ?? "owner_1"));
   tasks.setHumanTabRelease((key) => handBackToAgent(key, tabs, ctx.userBrowser ? {
     view: (k) => ctx.userBrowser!.view(cfg.runtimeUserId ?? "", k),
     control: (k, action) => ctx.userBrowser!.control(cfg.runtimeUserId ?? "", k, action),

@@ -123,6 +123,8 @@ interface FeedMemoryRow { id: string; owner_id: string; kind: FeedMemoryKind; te
 const FEED_TOPICS = /<!--\s*feed-topics:\s*(\[[\s\S]*?\])\s*-->/;
 const FEED_EMPTY = /<!--\s*feed-empty\s*-->/;
 const FEED_MARKERS = /\s*<!--\s*feed-(?:topics:[\s\S]*?|empty\s*)-->\s*/g;
+/** An account nobody opened for this long has all its schedules paused when the next one is due. */
+const SCHEDULES_IDLE_PAUSE_MS = 14 * 86_400_000;
 /** How often due schedules are checked; a run starts at most this late. */
 const SCHEDULE_TICK_MS = 30_000;
 /** A previous run in one of these states no longer holds the next one back. */
@@ -298,6 +300,9 @@ export class TaskService {
     /** The account's widgets, so its executor reuses and improves them instead of building another. */
     /** A member's daily tokens (src/control/quota.ts): once used up, no new turn starts until the day turns over. */
     setQuota(status: (() => QuotaStatus) | null): void { this.#quota = status; }
+    /** When the person last had the console open (their sessions, kept in the main database); null when unknown. */
+    setLastOpened(at: (() => number | null) | null): void { this.#lastOpened = at; }
+    #lastOpened: (() => number | null) | null = null;
     #quota: (() => QuotaStatus) | null = null;
     /** Today's use of the daily tokens; null for an account without a limit (the owner). */
     quota(): QuotaStatus | null { return this.#quota?.() ?? null; }
@@ -1654,8 +1659,19 @@ export class TaskService {
     private runDueSchedules(): void {
         if (this.#closed) return;
         const now = Date.now();
+        const ownerId = this.cfg.runtimeUserId ?? "owner_1";
         const due = this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status='active' AND next_run_at IS NOT NULL AND next_run_at<=? ORDER BY next_run_at")
-            .all(this.cfg.runtimeUserId ?? "owner_1", now) as unknown as ScheduleRow[];
+            .all(ownerId, now) as unknown as ScheduleRow[];
+        if (due.length && this.#lastOpened) {
+            // Nobody opened the console (or sent a message, say from a gadget) for 14 days: every schedule is paused, not run.
+            const opened = this.#lastOpened();
+            const spoke = (this.db.prepare("SELECT MAX(created_at) AS at FROM tasks WHERE schedule_id IS NULL AND conversation_id IN (SELECT id FROM conversations WHERE owner_id=?)").get(ownerId) as { at: number | null }).at;
+            const last = Math.max(opened ?? 0, spoke ?? 0);
+            if (last && now - last > SCHEDULES_IDLE_PAUSE_MS) {
+                this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE owner_id=? AND status='active'").run(now, ownerId);
+                return;
+            }
+        }
         for (const s of due) {
             if (this.#checking.has(s.id)) continue;
             try { if (s.condition_json && !s.builtin) this.checkThenFire(s, now); else this.fireSchedule(s, now); }

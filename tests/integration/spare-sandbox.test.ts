@@ -23,7 +23,7 @@ it('keeps one sandbox provisioned for the next registration, which takes it over
    const config=opts!.config!;
    const entry={config,identity:opts!.identity!,shut:false,calls};made.push(entry);
    const ctx={cfg:{...config,browser:{...config.browser,enabled:false},sandbox:{...config.sandbox,autostart:false}},log:h.ctx.log,db:h.ctx.db,sandboxSetupError:null,sandboxSurfaces:null,
-    agent:{init:async()=>{calls.push('agent.init');},setSandboxGate:()=>{}},tasks:{init:()=>{calls.push('tasks.init');},setQuota:()=>{}}} as unknown as AppContext;
+    agent:{init:async()=>{calls.push('agent.init');},setSandboxGate:()=>{}},tasks:{init:()=>{calls.push('tasks.init');},setQuota:()=>{},setLastOpened:()=>{}}} as unknown as AppContext;
    return {ctx,db:h.ctx.db,shutdown:async()=>{entry.shut=true;}};
   };
   const registry=new UserRuntimes(h.ctx,factory as never,{provision:()=>{}} as unknown as MemberModelGateway);

@@ -9,6 +9,7 @@ import {startVaultAutofill} from './vault.js';
 import {quotaStatus} from './quota.js';
 import type {MemberModelGateway} from './memberModelGateway.js';
 import {getUser} from './auth/owner.js';
+import {SessionStore} from './auth/sessions.js';
 import {isSuspended} from './auth/suspension.js';
 import {SPARE_ACCOUNT_KEY} from './auth/invites.js';
 import {randomId} from './auth/passwords.js';
@@ -170,6 +171,7 @@ export class UserRuntimes {
     if(this.root.share?.widgets)runtime.ctx.tasks.setWidgets(id=>this.root.share!.widgets!.list(id));
     // A member's tokens are limited per day (src/control/quota.ts); the owner's are not.
     if(user.role==='member')runtime.ctx.tasks.setQuota(()=>quotaStatus(runtime.ctx.db));
+    runtime.ctx.tasks.setLastOpened(()=>SessionStore.lastSeen(this.root.db,user.id));
     // A container found stopped stays stopped: its account's first use starts it, so a
     // service start no longer wakes every account. Only where idle stopping is on;
     // without it nothing would start the container later.

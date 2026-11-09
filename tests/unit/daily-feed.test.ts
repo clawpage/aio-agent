@@ -175,6 +175,34 @@ describe("the built-in daily feed", () => {
     } finally { delete cfg.agent.dailyFeedAt; }
   });
 
+  it("pauses every schedule of an account nobody opened for 14 days, instead of running them", async () => {
+    const day = 86_400_000;
+    db.prepare("INSERT INTO schedules (id,owner_id,title,instruction,spec_json,timezone,resources_json,status,next_run_at,created_at,updated_at) VALUES ('sched_w','owner_1','天气','查天气',?,?,'[]','active',?,0,0)")
+      .run(JSON.stringify({ kind: "daily", at: "07:00" }), cfg.browser.timezone, Date.now() - 1000);
+    const statuses = () => (db.prepare("SELECT status FROM schedules ORDER BY id").all() as { status: string }[]).map((r) => r.status);
+    // Opened 13 days ago: runs as usual.
+    tasks.setLastOpened(() => Date.now() - 13 * day);
+    fire();
+    await tick();
+    expect(codex.startedTurns).toHaveLength(1);
+    expect(statuses()).toEqual(["active", "active"]);
+    for (const t of codex.startedTurns) codex.completeTurn(t.turnId);
+    await tick();
+    // 15 days: the next due run pauses them all, the daily feed too, and nothing starts.
+    tasks.setLastOpened(() => Date.now() - 15 * day);
+    db.prepare("UPDATE schedules SET next_run_at=? WHERE id='sched_w'").run(Date.now() - 1000);
+    fire();
+    await tick();
+    expect(codex.startedTurns).toHaveLength(1);
+    expect(statuses()).toEqual(["paused", "paused"]);
+    // Unknown (never signed in): nothing is paused.
+    db.prepare("UPDATE schedules SET status='active',next_run_at=? WHERE id='sched_w'").run(Date.now() - 1000);
+    tasks.setLastOpened(() => null);
+    fire();
+    await tick();
+    expect(statuses()[1]).toBe("active");
+  });
+
   it("can be switched off for the whole deployment", async () => {
     tasks.close(); agent.shutdown();
     db.prepare("DELETE FROM schedules").run();

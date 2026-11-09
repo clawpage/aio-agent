@@ -125,6 +125,11 @@ export class SessionStore {
    * one whose new cookie was lost with a response cut off by suspension, logged
    * the person out. Expired or revoked sessions are refused.
    */
+  /** When the account last used the console on any device (to the hour), or null if it never signed in. */
+  static lastSeen(db: Db, ownerId: string): number | null {
+    return (db.prepare("SELECT MAX(last_seen_at) AS at FROM sessions WHERE owner_id = ?").get(ownerId) as { at: number | null }).at;
+  }
+
   heartbeat(session: Session, now = Date.now()): { expiresAt: number } | null {
     const expiresAt = now + this.#ttlMs;
     const res = this.#db
