@@ -20,6 +20,7 @@ import {
   type WorkingBlock,
 } from "../timeline";
 import { Markdown } from "./Markdown";
+import { DraftStrip } from "./DraftStrip";
 import { FilePreview } from "./FilePreview";
 import { FileCard } from "./FileCard";
 import { ComposerAttachments, useUploadTray } from "./ComposerAttachments";
@@ -630,6 +631,8 @@ function BlockView({
       </article>
     );
   }
+
+  if (block.kind === "drafts") return <DraftStrip paths={block.paths} onOpen={onOpenFile} />;
 
   if (block.kind === "assistant") {
     // Defensive fallback for stored or abnormal history: an assistant block

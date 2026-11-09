@@ -380,6 +380,31 @@ describe("working groups", () => {
     expect(status.text).toContain("沙箱崩了");
   });
 
+  it("shows the pictures the agent looked at as one draft strip per run of looks, each once, and none outside the workspace", () => {
+    const view = (id: string, path: string) => [
+      ev("item/started", { item: { type: "imageView", id, path } }, "t1"),
+      ev("item/completed", { item: { type: "imageView", id, path } }, "t1"),
+    ];
+    const state = feed([
+      ev("turn.started", { turnId: "t1" }, "t1"),
+      ...view("v1", "/home/gem/workspace/tasks/t1/.tmp/整图预览.jpg"),
+      ev("item/completed", { item: { id: "c1", type: "commandExecution", status: "completed" } }, "t1"),
+      ...view("v2", "/home/gem/workspace/tasks/t1/.tmp/发梢局部.png"),
+      ...view("v3", "/home/gem/workspace/tasks/t1/.tmp/整图预览.jpg"),
+      ...view("v4", "/tmp/elsewhere.png"),
+      ...view("v5", "/home/gem/workspace/tasks/t1/notes.txt"),
+      ev("item/completed", { item: { id: "m1", type: "agentMessage", text: "边缘已处理，正在核对。" } }, "t1"),
+      ...view("v6", "/home/gem/workspace/tasks/t1/结果.jpg"),
+    ]);
+    const strips = state.blocks.filter((b) => b.kind === "drafts") as Array<{ paths: string[] }>;
+    expect(strips.map((s) => s.paths)).toEqual([
+      ["/home/gem/workspace/tasks/t1/.tmp/整图预览.jpg", "/home/gem/workspace/tasks/t1/.tmp/发梢局部.png"],
+      ["/home/gem/workspace/tasks/t1/结果.jpg"],
+    ]);
+    // A look is not a tool row of its own.
+    expect(tools(state).some((b) => b.toolType === "imageView")).toBe(false);
+  });
+
   it("shows the model service's own errors only as the service being under maintenance, and none while Codex retries", () => {
     const state = feed([
       ev("turn.started", { turnId: "t1" }, "t1"),

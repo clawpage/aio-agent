@@ -90,6 +90,7 @@ export const chat: typeof zh = {
     abortTurn: "Abort this turn",
   },
   timeline: {
+    drafts: { badge: "Draft", note: "Pictures the AI looked at while working; not the final result" },
     status: {
       queued: "Queued",
       running: "Working…",

@@ -92,6 +92,7 @@ export const chat: typeof zh = {
   },
   /** Labels the timeline module builds from executor events. */
   timeline: {
+    drafts: { badge: "途中経過", note: "AI が作業中に確認した画像です。最終結果ではありません" },
     status: {
       queued: "順番待ち",
       running: "処理中…",

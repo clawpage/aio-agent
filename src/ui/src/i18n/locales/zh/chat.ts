@@ -90,6 +90,7 @@ export const chat = {
   },
   /** Labels the timeline module builds from executor events. */
   timeline: {
+    drafts: { badge: "中间稿", note: "AI 处理中查看的过程图，不是最终结果" },
     status: {
       queued: "已排队等待",
       running: "处理中…",

@@ -1,5 +1,6 @@
 import type { AgentEvent } from "./types";
 import { t } from "./i18n";
+import { isWorkspaceFilePath, workspaceFileKind } from "./sandboxLink";
 
 /** Lifecycle of one turn's collapsed "Working" group. */
 export type WorkingStatus = "queued" | "running" | "stopping" | "done" | "error" | "stopped" | "unknown";
@@ -86,7 +87,19 @@ export interface WorkingBlock {
   hasToolError: boolean;
 }
 
-export type Block = UserBlock | AssistantBlock | ReasoningBlock | ToolBlock | ApprovalBlock | StatusBlock | WorkingBlock;
+/**
+ * Pictures the agent looked at while it worked (its drafts, crops and checks of a photo it is editing), in the
+ * order seen. Consecutive looks with no prose between them share one strip; each picture shows once, as it is now.
+ */
+export interface DraftBlock {
+  kind: "drafts";
+  id: string;
+  turnId: string;
+  createdAt?: number;
+  paths: string[];
+}
+
+export type Block = UserBlock | AssistantBlock | ReasoningBlock | ToolBlock | ApprovalBlock | StatusBlock | WorkingBlock | DraftBlock;
 
 export interface TimelineState {
   blocks: Block[];
@@ -494,6 +507,22 @@ function segmentFor(state: TimelineState, turnId: string): WorkingBlock {
  * notice lands just before it rather than after; with no live row this is a
  * plain append.
  */
+/** A picture the agent looked at joins the strip of pictures it looked at just before, or starts one. */
+function addDraft(state: TimelineState, turnId: string, id: string, path: string, createdAt: number | undefined): void {
+  if (!isWorkspaceFilePath(path) || workspaceFileKind(path) !== "image") return;
+  for (let i = state.blocks.length - 1; i >= 0; i--) {
+    const block = state.blocks[i]!;
+    if (block.kind === "working") continue;
+    if (block.kind === "drafts" && block.turnId === turnId) {
+      if (!block.paths.includes(path)) block.paths = [...block.paths, path];
+      return;
+    }
+    break;
+  }
+  push(state, { kind: "drafts", id, turnId, createdAt, paths: [path] });
+  contentBoundary(state, turnId, id);
+}
+
 function pushNotice(state: TimelineState, turnId: string, block: Block): void {
   const ids = state.segmentsByTurn.get(turnId);
   const lastId = ids?.length ? ids[ids.length - 1] : undefined;
@@ -683,6 +712,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (type === "userMessage") return;
+      if (type === "imageView") return addDraft(state, turnId, id, text(item.path), event.createdAt);
       if (findChild(state, id)) return;
       addTool(state, turnId, {
         kind: "tool",
@@ -756,6 +786,7 @@ export function applyEvent(state: TimelineState, event: AgentEvent): void {
         return;
       }
       if (type === "userMessage") return;
+      if (type === "imageView") return addDraft(state, turnId, id, text(item.path), event.createdAt);
       const output = toolOutput(item);
       const failed = text(item.status) === "failed" || text(item.status) === "error";
       const found = findChild(state, id);
