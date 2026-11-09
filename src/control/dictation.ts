@@ -6,7 +6,12 @@ import { kbSql } from "./kb.js";
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
 const OAUTH_BETA = "oauth-2025-04-20";
-const POLISH_TIMEOUT_MS = 10_000;
+/**
+ * Polishing usually answers in about 1.4 s (p90 2.5 s, p99 5.8 s over 417 runs). A request still out
+ * after HEDGE_MS gets a twin, and the first answer wins; past POLISH_TIMEOUT_MS the text goes as heard.
+ */
+const POLISH_TIMEOUT_MS = 6_000;
+const POLISH_HEDGE_MS = 2_500;
 const TYPE_TIMEOUT_MS = 5_000;
 export const DICTATION_MAX_CHARS = 4_000;
 const NAMES_TTL_MS = 6 * 60 * 60_000;
@@ -73,39 +78,52 @@ export class Dictation {
     const names = opts.names ? await this.#familyNames() : [];
     const oauth = state.envKey === "CLAUDE_CODE_OAUTH_TOKEN";
     const started = Date.now();
-    try {
-      const res = await fetch(`${this.#cfg.claudeCode.apiBaseUrl.replace(/\/$/, "")}/v1/messages`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "anthropic-version": "2023-06-01",
-          ...(oauth ? { authorization: `Bearer ${state.secret}`, "anthropic-beta": OAUTH_BETA } : { "x-api-key": state.secret }),
-        },
-        body: JSON.stringify({
-          model: this.#cfg.polishModel,
-          max_tokens: 2048,
-          ...(this.#cfg.polishEffort ? { output_config: { effort: this.#cfg.polishEffort } } : {}),
-          system: [
-            // A subscription credential only serves requests that introduce themselves as Claude Code.
-            { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
-            { type: "text", text: POLISH_PROMPT },
-            ...(names.length ? [{ type: "text", text: `${NAMES_PROMPT}\n<names>\n${names.join("\n")}\n</names>` }] : []),
-            ...(opts.terms?.length ? [{ type: "text", text: `${TERMS_PROMPT}\n<terms>\n${opts.terms.join("\n")}\n</terms>` }] : []),
-          ],
-          messages: [{ role: "user", content: `<transcript>\n${text}\n</transcript>` }],
-        }),
-        signal: AbortSignal.timeout(POLISH_TIMEOUT_MS),
-      });
+    const body = JSON.stringify({
+      model: this.#cfg.polishModel,
+      max_tokens: 2048,
+      ...(this.#cfg.polishEffort ? { output_config: { effort: this.#cfg.polishEffort } } : {}),
+      system: [
+        // A subscription credential only serves requests that introduce themselves as Claude Code.
+        { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+        { type: "text", text: POLISH_PROMPT },
+        ...(names.length ? [{ type: "text", text: `${NAMES_PROMPT}\n<names>\n${names.join("\n")}\n</names>` }] : []),
+        ...(opts.terms?.length ? [{ type: "text", text: `${TERMS_PROMPT}\n<terms>\n${opts.terms.join("\n")}\n</terms>` }] : []),
+      ],
+      messages: [{ role: "user", content: `<transcript>\n${text}\n</transcript>` }],
+    });
+    const headers = {
+      "content-type": "application/json",
+      "anthropic-version": "2023-06-01",
+      ...(oauth ? { authorization: `Bearer ${state.secret}`, "anthropic-beta": OAUTH_BETA } : { "x-api-key": state.secret }),
+    };
+    const done = new AbortController();
+    const signal = AbortSignal.any([done.signal, AbortSignal.timeout(POLISH_TIMEOUT_MS)]);
+    const ask = async (): Promise<string> => {
+      const res = await fetch(`${this.#cfg.claudeCode.apiBaseUrl.replace(/\/$/, "")}/v1/messages`, { method: "POST", headers, body, signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
-      const reply = (body.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
+      const answer = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+      const reply = (answer.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("");
       const out = [...reply.matchAll(TIDIED)].at(-1)?.[1]?.trim();
       if (!out) throw new Error(reply.trim() ? "no <text> block" : "empty");
-      this.#log.info("polished", { ms: Date.now() - started, chars: text.length, out: out.length, names: names.length });
+      return out;
+    };
+    let hedged = false;
+    try {
+      const first = ask();
+      // A slow first request gets a twin; whichever answers first is used.
+      const twin = new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => { hedged = true; ask().then(resolve, reject); }, POLISH_HEDGE_MS);
+        first.then(() => clearTimeout(timer), () => { clearTimeout(timer); if (!hedged) reject(new Error("first failed")); });
+        signal.addEventListener("abort", () => { clearTimeout(timer); reject(signal.reason); }, { once: true });
+      });
+      const out = await Promise.any([first, twin]).catch((err: unknown) => { throw err instanceof AggregateError ? err.errors[0] : err; });
+      this.#log.info("polished", { ms: Date.now() - started, chars: text.length, out: out.length, names: names.length, hedged });
       return { text: out, polished: true };
     } catch (err) {
-      this.#log.warn("polish failed; typing the transcript as heard", { error: err instanceof Error ? err.message : String(err) });
+      this.#log.warn("polish failed; typing the transcript as heard", { error: err instanceof Error ? err.message : String(err), ms: Date.now() - started, hedged });
       return { text, polished: false };
+    } finally {
+      done.abort();
     }
   }
 

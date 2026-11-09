@@ -123,6 +123,41 @@ async function request<T>(
   return (parsed ?? {}) as T;
 }
 
+/**
+ * A JSON POST that also says when its body has been sent (`onSent`): fetch cannot tell an upload
+ * stuck on a phone's network from a server still working, XMLHttpRequest can. Same headers and errors as `request`.
+ */
+function postWithUpload<T>(path: string, body: unknown, opts: { signal: AbortSignal; onStart: () => void; onSent: () => void }): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", apiUrl(path));
+    xhr.withCredentials = API_CREDENTIALS === "include";
+    xhr.setRequestHeader("content-type", "application/json");
+    const csrf = cookie("pa_csrf");
+    if (csrf) xhr.setRequestHeader("x-csrf-token", csrf);
+    xhr.setRequestHeader("x-client-platform", clientPlatform());
+    xhr.setRequestHeader("x-aio-locale", locale);
+    xhr.upload.addEventListener("loadstart", opts.onStart);
+    xhr.upload.addEventListener("load", opts.onSent);
+    const abort = () => xhr.abort();
+    opts.signal.addEventListener("abort", abort, { once: true });
+    const settle = () => opts.signal.removeEventListener("abort", abort);
+    xhr.addEventListener("abort", () => { settle(); reject(new DOMException("Aborted", "AbortError")); });
+    xhr.addEventListener("error", () => { settle(); reject(new TypeError("Network request failed")); });
+    xhr.addEventListener("load", () => {
+      settle();
+      let parsed: unknown = null;
+      try { parsed = xhr.responseText ? JSON.parse(xhr.responseText) : null; } catch { parsed = null; }
+      if (xhr.status >= 200 && xhr.status < 300) { resolve((parsed ?? {}) as T); return; }
+      const err = (parsed ?? {}) as { error?: string; message?: string };
+      const readable = typeof err.message === "string" && err.message.trim() && err.message.length <= 300 ? err.message : friendlyStatusMessage(xhr.status);
+      reject(new ApiError(xhr.status, err.error ?? "error", readable));
+    });
+    if (opts.signal.aborted) { xhr.abort(); return; }
+    xhr.send(JSON.stringify(body));
+  });
+}
+
 /** A camera as the card needs it (HaCameras' CameraInfo). */
 export interface CameraInfo { entity: string; name: string; state: string; live: boolean; ptz: boolean; recordings: boolean; events: boolean }
 
@@ -352,15 +387,16 @@ export const api = {
   capabilities: () => request<CapabilitiesResponse>("/api/capabilities"),
   /** Voice input: whether a speech recognizer is configured, and what a WAV recording says. */
   asr: () => request<{ enabled: boolean; locales?: string[] }>("/api/asr"),
-  transcribe: (wav: Uint8Array, microphone?: import("./voice").MicrophoneInfo, signal?: AbortSignal) => {
+  /** `onStart` / `onSent`: the recording began / finished uploading (where the browser reports it), and only the server's answer is awaited. */
+  transcribe: (wav: Uint8Array, microphone: import("./voice").MicrophoneInfo | undefined, opts: { signal: AbortSignal; onStart: () => void; onSent: () => void }) => {
     let binary = "";
     for (let i = 0; i < wav.length; i += 0x8000) binary += String.fromCharCode(...wav.subarray(i, i + 0x8000));
-    return request<{ text: string; ref?: string }>("/api/asr", { method: "POST", body: { audioBase64: btoa(binary), microphone }, signal });
+    return postWithUpload<{ text: string; ref?: string }>("/api/asr", { audioBase64: btoa(binary), microphone }, opts);
   },
   /** Wakes the speech server while the user is talking: it is slow after even a few seconds idle. */
   asrWarm: () => request<void>("/api/asr/warm", { method: "POST", body: {} }),
   /** The console's side of how long a voice input took, under the `ref` its text came with. */
-  asrTiming: (body: { ref: string; prepareMs: number; roundTripMs: number; attempts: number }) =>
+  asrTiming: (body: { ref: string; prepareMs: number; roundTripMs: number; uploadMs: number | null; attempts: number }) =>
     request<void>("/api/asr/timing", { method: "POST", body }),
   sandboxContext: () => request<{ context: string | null }>("/api/sandbox/context"),
 

@@ -693,8 +693,9 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
   识别出的文字再经与语音键盘同一套润色（`PA_DICTATION_MODEL`，owner 的 Claude 凭据，见「语音配件」）后返回 `{text, polished}`；
   识别服务返回的 `words`（它的常用词表）一并交给润色，用来改回它仍听错的品牌、地名等，
   润色失败或未配置 Claude 凭据时返回原文（`polished:false`）。所有已登录账号的 `/api/asr*` 都由主控制面处理（不经成员自己的运行时），所以成员同样用 owner 的润色模型，与成员被分配的模型和沙箱凭据无关。录音不进沙箱；默认不落盘。
-- **上传卡住时重发**：手机网络偶尔把上传卡住（实测一次 320 KB 用了 47 秒，平时零点几秒）。每次请求给 8 秒加每 50 KB 1 秒，超时就放弃这次、换一个新请求再发一次（最多两次）；第二次仍超时提示识别失败。
-- **识别服务预热与耗时**：识别服务闲置十几秒后会慢 2–6 倍，所以开始录音时以及录音中每 4 秒，控制台调一次 `POST /api/asr/warm`，控制面给识别服务发半秒静音（两次之间至少隔 2 秒，失败不影响录音）。每次识别成功后返回一个 `ref`，控制台再用 `POST /api/asr/timing` 报自己这一侧的耗时（生成 WAV、上传加等待结果、发了几次 `attempts`）；控制面把它和服务端的识别空闲时长、识别、润色、服务端合计耗时合成一行 `voice input timing` 日志（所有账号，只有数字），记了回测日志的账号也写进该条 JSON 的 `client`。
+- **上传卡住时重发**：手机网络偶尔把上传卡住（实测 22 秒、47 秒传约 300 KB，平时 0.3 秒）。录音改用 XMLHttpRequest 上传，浏览器报告上传开始与结束（WebKit 会报，Playwright 拦截下的 Chromium 不报）：上传本身给 3 秒加每 100 KB 1 秒，开始了却没传完就放弃这次、换新请求再发一次（最多两次）；传完后只等服务器回答（最多 20 秒，慢了不重发）。浏览器不报告上传进度时不判断卡住，直接按等回答计时。
+- **润色限时**：润色通常 1.4 秒（p90 2.5 秒、p99 5.8 秒）；2.5 秒还没回答就并行再发一次、谁先回用谁，6 秒仍没有就返回识别原文。
+- **识别服务预热与耗时**：识别服务闲置十几秒后会慢 2–6 倍，所以开始录音时以及录音中每 4 秒，控制台调一次 `POST /api/asr/warm`，控制面给识别服务发半秒静音（两次之间至少隔 2 秒，失败不影响录音）。每次识别成功后返回一个 `ref`，控制台再用 `POST /api/asr/timing` 报自己这一侧的耗时（生成 WAV、上传本身 `uploadMs`、上传加等待结果、发了几次 `attempts`）；控制面把它和服务端的识别空闲时长、识别、润色、服务端合计耗时合成一行 `voice input timing` 日志（所有账号，只有数字），记了回测日志的账号也写进该条 JSON 的 `client`。
 - **回测日志**：`PA_VOICE_LOG_USERS` 列出的账号（`*` 为全部）每次语音输入在控制面数据目录 `voice-log/<日期>/` 留下录音 WAV 和同名 JSON
   （录音用的麦克风名、当时可见的全部麦克风与音频硬件采样率——蓝牙或车载麦克风通常是 16/24 kHz、手机机身麦克风是 48 kHz；识别服务地址与其报告的模型、识别原文 `text`/`raw`、润色模型/effort/结果、各段耗时、错误），文件 0600，超过 `PA_VOICE_LOG_DAYS` 天（默认 30）的日期目录在新的一天第一次写入时删除。
   `node bin/voice-replay.mjs`（compose：`docker exec aio-control-1 node bin/voice-replay.mjs`）把这些录音重新送去识别：`--asr <地址>` 可给多个做对比，
@@ -719,7 +720,7 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
 - **用量页**：`GET /api/gadget/usage` 把 `PA_GADGET_USAGE_URL` 的 JSON 原样转给配件（5 秒超时、限 64 KB、非 JSON 返回 502；未配置 404）。
   现有部署指向 Usage HUD 的回环快照 `http://host.docker.internal:4796/gadget.json`，配件「用量」页每分钟拉取一次。
 - **语音键盘**：配件「语音键盘」页点麦克风开始录音、再点一下结束；转写后发 `POST /api/gadget/dictation`（配件令牌，JSON `{text}`，最多 4000 字），
-  控制面用 owner 的 Claude 凭据调 `PA_DICTATION_MODEL`（默认 `claude-sonnet-5-5`、effort `low`，10 秒超时；输入区语音输入共用）去赘词、改错字、补标点，
+  控制面用 owner 的 Claude 凭据调 `PA_DICTATION_MODEL`（默认 `claude-sonnet-5-5`、effort `low`，2.5 秒未回并行再发一次、6 秒超时；输入区语音输入共用）去赘词、改错字、补标点，
   再交给宿主 Mac 上的键盘桥（`bin/keyboard-bridge.mjs`）粘贴到当前光标处，返回 `{text, polished}`。
   说话的账号能用知识库（owner 与 `PA_KB_MCP_MEMBERS`）时，润色还会参考知识库里照片标注的人名（出现至少 10 次的，最多 40 个；
   经 `kb_sql` 读取，每 6 小时重读，读不到时 5 分钟后再试、照常润色），把被识别成同音字或拼错的人名改回原写法；其他账号不注入。润色失败时照原文输入（`polished:false`）；

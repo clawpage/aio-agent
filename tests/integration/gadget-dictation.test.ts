@@ -14,7 +14,7 @@ const dictate = (text: unknown, token = TOKEN) =>
   h.request("/api/gadget/dictation", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ text }) });
 
 const POLISHED = "<text>明天下午三点开会，记得带电脑。</text>";
-const model = { fail: false, reply: POLISHED, requests: [] as Array<{ headers: http.IncomingHttpHeaders; body: any }> };
+const model = { fail: false, reply: POLISHED, hang: 0, requests: [] as Array<{ headers: http.IncomingHttpHeaders; body: any }> };
 const bridge = { status: 200, url: "", typed: [] as Array<{ auth: string | undefined; text: string }> };
 const kb = { calls: [] as Array<{ auth: string | undefined; body: any }> };
 const servers: http.Server[] = [];
@@ -41,6 +41,8 @@ beforeAll(async () => {
   const modelUrl = await listen((req, body, res) => {
     model.requests.push({ headers: req.headers, body });
     if (model.fail) { res.writeHead(529).end(); return; }
+    // A request that never answers (the API's slow tail): the caller gives up on it.
+    if (model.hang > 0) { model.hang -= 1; return; }
     res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ content: [{ type: "text", text: model.reply }] }));
   });
   const bridgeUrl = await listen((req, body, res) => {
@@ -140,3 +142,18 @@ it("tells the model the knowledge base's names, only for an account the knowledg
   expect(kb.calls).toHaveLength(1);
   fs.writeFileSync(h.ctx.cfg.gadgetTokenPath, `AIO_GADGET_TOKEN=${TOKEN}\n`, { mode: 0o600 });
 });
+
+it("gives a slow polish a twin, uses whichever answers first, and gives up on both at six seconds", async () => {
+  h.ctx.cfg.keyboardBridge.url = bridge.url;
+  model.hang = 1;
+  let before = model.requests.length, started = Date.now();
+  expect(await (await dictate("嗯那个明天下午三点开会呃记得带电脑")).json()).toEqual({ text: "明天下午三点开会，记得带电脑。", polished: true });
+  expect(model.requests.length - before).toBe(2);
+  expect(Date.now() - started).toBeLessThan(5_500);
+
+  model.hang = 2;
+  before = model.requests.length; started = Date.now();
+  expect(await (await dictate("明天开会")).json()).toEqual({ text: "明天开会", polished: false });
+  expect(model.requests.length - before).toBe(2);
+  expect(Date.now() - started).toBeLessThan(9_000);
+}, 20_000);

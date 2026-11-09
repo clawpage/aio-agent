@@ -4,7 +4,7 @@ import { mockConsole } from "./mock-api";
 // Chromium's fake microphone (a tone) stands in for a voice; the speech server is mocked.
 test.use({ launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] } });
 
-async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null; stall?: number } = {}) {
+async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null; hang?: number; stall?: number } = {}) {
   const posted: Buffer[] = [];
   const warms: number[] = [], timings: Record<string, unknown>[] = [];
   await mockConsole(page, { conversations: [] });
@@ -14,10 +14,28 @@ async function open(page: Page, opts: { enabled?: boolean; heard?: string; local
   await page.route(url => url.pathname === "/api/asr", async r => {
     if (r.request().method() === "GET") return r.fulfill({ json: { enabled: opts.enabled ?? true, ...(opts.locales === null ? {} : { locales: opts.locales ?? ["zh-CN", "zh-TW", "en"] }) } });
     posted.push(Buffer.from((r.request().postDataJSON() as { audioBase64: string }).audioBase64, "base64"));
-    // A stalled upload: never answered (the console gives up on it).
-    if (posted.length <= (opts.stall ?? 0)) return;
+    // A server that never answers.
+    if (posted.length <= (opts.hang ?? 0)) return;
     await r.fulfill({ json: { text: opts.heard ?? "打开走廊灯。", ref: "ref-1" } });
   });
+  // An upload stuck on the phone's network: the first `stall` recordings never leave the browser.
+  if (opts.stall) await page.addInitScript((stall) => {
+    const open = XMLHttpRequest.prototype.open, send = XMLHttpRequest.prototype.send;
+    let stalled = 0;
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest & { asr?: boolean }, method: string, url: string | URL) {
+      this.asr = String(url).endsWith("/api/asr");
+      return open.call(this, method, url, true);
+    } as typeof XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.send = function (this: XMLHttpRequest & { asr?: boolean }, body?: Document | XMLHttpRequestBodyInit | null) {
+      if (this.asr && stalled < stall) {
+        // It starts uploading and never finishes.
+        stalled += 1; this.upload.dispatchEvent(new ProgressEvent("loadstart"));
+        this.abort = () => { this.dispatchEvent(new ProgressEvent("abort")); };
+        return;
+      }
+      return send.call(this, body);
+    };
+  }, opts.stall);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   return Object.assign(posted, { warms, timings });
@@ -61,11 +79,13 @@ test("records from the microphone, sends 16 kHz mono WAV and adds what was said 
   expect(posted.warms.length).toBeGreaterThanOrEqual(1);
   await expect.poll(() => posted.timings.length).toBe(1);
   expect(posted.timings[0]).toMatchObject({ ref: "ref-1", prepareMs: expect.any(Number), roundTripMs: expect.any(Number), attempts: 1 });
+  // WebKit (the iPhone) says when the upload is done; Chromium under Playwright's interception does not.
+  if (info.project.name === "mobile-webkit") expect(posted.timings[0]!.uploadMs).toEqual(expect.any(Number));
   await page.screenshot({ path: info.outputPath("transcribed.png") });
 });
 
 test("a tap while the words come back cancels: nothing is added and nothing is said", async ({ page }, info) => {
-  const posted = await open(page, { stall: 1 });
+  const posted = await open(page, { hang: 1 });
   const composer = page.locator(".composer"), input = page.getByRole("textbox", { name: "消息", exact: true });
   await composer.getByRole("button", { name: "语音输入" }).click();
   await page.waitForTimeout(1200);
@@ -87,9 +107,9 @@ test("an upload that stalls is sent again, and the words still arrive", async ({
   await composer.getByRole("button", { name: "语音输入" }).click();
   await page.waitForTimeout(1200);
   await composer.getByRole("button", { name: /停止录音/ }).click();
-  // The first attempt is given about ten seconds for this short clip.
-  await expect(input).toHaveValue("打开走廊灯。", { timeout: 30_000 });
-  expect(posted).toHaveLength(2);
+  // The first upload is given about four seconds for this short clip.
+  await expect(input).toHaveValue("打开走廊灯。", { timeout: 15_000 });
+  expect(posted).toHaveLength(1);
   await expect.poll(() => posted.timings.length).toBe(1);
   expect(posted.timings[0]).toMatchObject({ attempts: 2 });
 });

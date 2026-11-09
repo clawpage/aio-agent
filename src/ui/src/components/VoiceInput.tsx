@@ -8,11 +8,13 @@ import { tapProps } from "../tap";
 
 const WARM_EVERY_MS = 4_000;
 /**
- * An upload that stalls on a phone's network (once 47 s for 320 KB that usually take a fraction of a
- * second) is sent again on a new request: given this long, plus a second for every 50 KB, then once more.
+ * An upload that stalls on a phone's network (22 s and 47 s for about 300 KB that usually take 0.3 s)
+ * is sent again on a new request: the upload alone gets this long, plus a second for every 100 KB,
+ * then once more. Once it is all sent, the server (recognition, then at most 6 s of polishing) gets ANSWER_MS.
  */
-const ATTEMPT_MS = 8_000;
-const ATTEMPT_MS_PER_KB = 20;
+const UPLOAD_MS = 3_000;
+const UPLOAD_MS_PER_KB = 10;
+const ANSWER_MS = 20_000;
 const ATTEMPTS = 2;
 
 /** Why the microphone would not open, in words the user can act on. */
@@ -65,26 +67,32 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
       const stopped = performance.now();
       const audio = r.stop();
       const sent = performance.now();
-      const limit = ATTEMPT_MS + Math.round(audio.byteLength / 1024) * ATTEMPT_MS_PER_KB;
-      let attempts = 0, answer: { text: string; ref?: string } | null = null;
+      const uploadLimit = UPLOAD_MS + Math.round(audio.byteLength / 1024) * UPLOAD_MS_PER_KB;
+      let attempts = 0, uploadMs: number | null = null, answer: { text: string; ref?: string } | null = null;
       while (!answer) {
         attempts += 1;
         const attempt = new AbortController();
         const stop = () => attempt.abort();
         cancel.signal.addEventListener("abort", stop);
-        const timer = setTimeout(stop, limit);
+        const began = performance.now();
+        let stalled = false, uploading = false;
+        // All sent: from here only the server's answer is waited for, and a slow one is not sent again.
+        const awaitAnswer = () => { clearTimeout(timer); timer = setTimeout(stop, ANSWER_MS); };
+        // Only an upload the browser says began and has not finished counts as stalled; one it says nothing about is not judged.
+        let timer = setTimeout(() => { if (uploading) { stalled = true; stop(); } else awaitAnswer(); }, uploadLimit);
+        const onSent = () => { uploading = false; uploadMs = performance.now() - began; awaitAnswer(); };
         try {
-          answer = await api.transcribe(audio, r.microphone, attempt.signal);
+          answer = await api.transcribe(audio, r.microphone, { signal: attempt.signal, onStart: () => { uploading = true; }, onSent });
         } catch (err) {
-          // Cancelled by the person, or the last attempt ran out: no retry.
-          if (cancel.signal.aborted || !attempt.signal.aborted || attempts >= ATTEMPTS) throw err;
+          // Cancelled by the person, a server too slow to answer, or the last stalled upload: no retry.
+          if (cancel.signal.aborted || !stalled || attempts >= ATTEMPTS) throw err;
         } finally {
           clearTimeout(timer);
           cancel.signal.removeEventListener("abort", stop);
         }
       }
       const { text, ref } = answer;
-      if (ref) void api.asrTiming({ ref, prepareMs: sent - stopped, roundTripMs: performance.now() - sent, attempts }).catch(() => { /* only a measurement */ });
+      if (ref) void api.asrTiming({ ref, prepareMs: sent - stopped, roundTripMs: performance.now() - sent, uploadMs, attempts }).catch(() => { /* only a measurement */ });
       if (text) callbacks.current.onText(text);
       else callbacks.current.onError(t.voice.notHeard);
     } catch (err) {
