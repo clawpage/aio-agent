@@ -7,7 +7,7 @@ import type { Db } from "../db.js";
 import { getMeta, setMeta } from "../db.js";
 import type { Config } from "../config.js";
 import type { Logger } from "../../common/logger.js";
-import type { CodexModel, SandboxAccount } from "./sandboxCodex.js";
+import { modelServiceFailed, type CodexModel, type SandboxAccount } from "./sandboxCodex.js";
 import type { DispatchTimingSink } from "./dispatchTiming.js";
 import { BridgeModel, CHATGPT_PROVIDER_ID } from "../bridgeModel.js";
 import { CLAUDE_CODE_PROVIDER_ID, type ClaudeCodeHarness } from "../claudeCode.js";
@@ -1858,8 +1858,7 @@ export class AgentManager {
         // A failure of the model service (usage limit, rate limit, outage): the person is only told the service is under
         // maintenance; what it was goes to the log. A turn too long for the model is the person's to act on and keeps its words.
         const info = turn.error?.codexErrorInfo;
-        const service = info != null && !(typeof info === "string" ? info : Object.keys(info as object)[0] ?? "").startsWith("contextWindow");
-        if (service) {
+        if (modelServiceFailed(info)) {
           this.#log.warn("model service failed a turn", { turnId: turn.id, info: JSON.stringify(info).slice(0, 200), error: String(turn.error?.message ?? "").slice(0, 300) });
           this.#turnErrors.set(turn.id, t().agent.turn.maintenance);
         } else if (typeof turn.error?.message === "string" && turn.error.message) this.#turnErrors.set(turn.id, turn.error.message);

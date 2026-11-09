@@ -350,14 +350,19 @@ it('runs member planning through the fixed provider at low effort and refuses an
  try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('temporarily unavailable');}finally{unavailable.close();}
 });
 
-it('shows the reason a planning turn failed',async()=>{
- const server=new FakeAppServer();
- server.handle('thread/start',()=>({thread:{id:'quota-thread'}}));
- const limit="You've hit your usage limit. Try again at Oct 4th.";
- server.handle('turn/start',()=>{setTimeout(()=>server.notify('turn/completed',{threadId:'quota-thread',turn:{id:'quota-turn',status:'failed',error:{message:limit}}}),5);return {turn:{id:'quota-turn'}};});
+it('shows the reason a planning turn failed, and a failure of the model service only as maintenance',async()=>{
+ const server=new FakeAppServer();let n=0;
+ server.handle('thread/start',()=>({thread:{id:`quota-${++n}`}}));
+ const reason='Not logged in';
+ const limit="You've hit your usage limit. Visit https://chatgpt.com/settings/usage to purchase more credits or try again at Nov 10th.";
+ server.handle('turn/start',p=>{setTimeout(()=>server.notify('turn/completed',{threadId:p.threadId,turn:{id:'quota-turn',status:'failed',
+  error:p.threadId==='quota-1'?{message:reason}:{message:limit,codexErrorInfo:'usageLimitExceeded'}}}),5);return {turn:{id:'quota-turn'}};});
  const session=makeSession(server,200);
  try {
-  await expect(session.planTask('request','soul')).rejects.toThrow(`Task assignment failed: ${limit}`);
+  await expect(session.planTask('request','soul')).rejects.toThrow(`Task assignment failed: ${reason}`);
+  const failed=await session.planTask('request','soul').catch((err:Error)=>err.message);
+  expect(failed).toContain('under maintenance');
+  expect(failed).not.toContain('chatgpt.com');
  } finally {session.close();}
 });
 

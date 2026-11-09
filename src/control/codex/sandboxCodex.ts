@@ -22,6 +22,11 @@ import type { HostTokenSource } from "./hostTokens.js";
 import type { UsageLedger } from '../usage.js';
 import { t } from "../i18n/index.js";
 
+/** Whether Codex says the model service failed a turn (usage limit, rate limit, outage), not that the turn was too long for the model. */
+export function modelServiceFailed(info: unknown): boolean {
+  return info != null && !(typeof info === "string" ? info : Object.keys(info as object)[0] ?? "").startsWith("contextWindow");
+}
+
 /** After the connection to a bridged Codex breaks, how long to keep joining it again (sandboxd may be restarting). */
 const REJOIN_FOR_MS = 60_000;
 const REJOIN_EVERY_MS = 1_000;
@@ -420,10 +425,11 @@ export class SandboxCodexSession {
     } finally {
       onTiming?.({ classifierMs: Date.now() - started });
     }
-    const { text, error, timedOut } = result;
-    // A reported reason (such as an exhausted usage limit) is shown on the task
-    // instead of a generic "try again".
-    if (error) throw new Error(t().agent.dispatch.failed(error));
+    const { text, error, service, timedOut } = result;
+    // A failure of the model service (usage limit, rate limit, outage) is only told as maintenance, as on a run;
+    // another reported reason is shown on the task instead of a generic "try again".
+    if (error && service) this.#log.warn("model service failed dispatch", { error: error.slice(0, 300) });
+    if (error) throw new Error(service ? t().agent.turn.maintenance : t().agent.dispatch.failed(error));
     if (timedOut) throw new DispatchTimeoutError(Math.round(this.planTimeoutMs / 1000));
     return text;
   }
@@ -450,12 +456,12 @@ export class SandboxCodexSession {
   }
 
   /** `ownModel` picks another model on the owner's own login; `requestedModel` goes through the gateway; `servers` are the only MCP servers the thread gets. */
-  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+  async #auxiliaryText(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; service?: boolean; timedOut?: boolean }> {
     this.#auxRunning += 1;
     try { return await this.#runAuxiliary(prompt, effort, timeoutMs, developerInstructions, requestedModel, onTiming, ownModel, servers); } finally { this.#auxRunning -= 1; }
   }
 
-  async #runAuxiliary(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; timedOut?: boolean }> {
+  async #runAuxiliary(prompt: string, effort: string | null, timeoutMs: number, developerInstructions?: string, requestedModel?: string, onTiming?: DispatchTimingSink, ownModel?: string, servers: Record<string, unknown> = {}): Promise<{ text: string | null; error: string | null; service?: boolean; timedOut?: boolean }> {
     const connectionStarted = Date.now();
     await this.start();
     onTiming?.({ connectionMs: Date.now() - connectionStarted });
@@ -494,6 +500,7 @@ export class SandboxCodexSession {
     // Only a real `turn/completed {status:"completed"}` may produce a title.
     let turnStatus: string | null = null;
     let failure: string | null = null;
+    let service = false;
     let timedOut = false;
     let startFailed = false;
     let startError: unknown = null;
@@ -525,9 +532,10 @@ export class SandboxCodexSession {
       }
       if (method === "turn/completed") {
         if (firstTextAt !== null) onTiming?.({ finishMs: Date.now() - firstTextAt });
-        const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }>; error?: { message?: unknown } | null } | undefined;
+        const turn = p.turn as { status?: string; items?: Array<{ type?: string; text?: string }>; error?: { message?: unknown; codexErrorInfo?: unknown } | null } | undefined;
         turnStatus = typeof turn?.status === "string" ? turn.status : "unknown";
         if (typeof turn?.error?.message === "string" && turn.error.message) failure = turn.error.message;
+        service = modelServiceFailed(turn?.error?.codexErrorInfo);
         const message = (turn?.items ?? []).find((it) => it?.type === "agentMessage" && typeof it.text === "string");
         if (message?.text) finalText = message.text;
         settle();
@@ -580,7 +588,7 @@ export class SandboxCodexSession {
         await this.#interruptAuxTurn(threadId, startPromise, () => turnId);
       }
     }
-    if (turnStatus !== "completed") return { text: null, error: failure, timedOut };
+    if (turnStatus !== "completed") return { text: null, error: failure, service, timedOut };
     return { text: finalText || deltas.join("") || null, error: null };
   }
 
