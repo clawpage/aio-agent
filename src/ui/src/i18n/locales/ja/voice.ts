@@ -11,6 +11,7 @@ export const voice: typeof zh = {
   failed: '音声認識に失敗しました',
   stopRecording: (clock: string) => `録音を停止（${clock}）`,
   transcribing: '認識中…',
+  cancelTranscribing: '認識中…タップでキャンセル',
   input: '音声入力',
   stopAndTranscribe: '停止して認識',
   short: '音声',

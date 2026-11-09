@@ -11,6 +11,7 @@ export const voice: typeof zh = {
   failed: "Speech recognition failed",
   stopRecording: (clock: string) => `Stop recording (${clock})`,
   transcribing: "Transcribing…",
+  cancelTranscribing: "Transcribing… tap to cancel",
   input: "Voice input",
   stopAndTranscribe: "Stop and transcribe",
   short: "Voice",

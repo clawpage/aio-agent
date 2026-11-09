@@ -4,7 +4,7 @@ import { mockConsole } from "./mock-api";
 // Chromium's fake microphone (a tone) stands in for a voice; the speech server is mocked.
 test.use({ launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] } });
 
-async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null } = {}) {
+async function open(page: Page, opts: { enabled?: boolean; heard?: string; locales?: string[] | null; stall?: number } = {}) {
   const posted: Buffer[] = [];
   const warms: number[] = [], timings: Record<string, unknown>[] = [];
   await mockConsole(page, { conversations: [] });
@@ -14,6 +14,8 @@ async function open(page: Page, opts: { enabled?: boolean; heard?: string; local
   await page.route(url => url.pathname === "/api/asr", async r => {
     if (r.request().method() === "GET") return r.fulfill({ json: { enabled: opts.enabled ?? true, ...(opts.locales === null ? {} : { locales: opts.locales ?? ["zh-CN", "zh-TW", "en"] }) } });
     posted.push(Buffer.from((r.request().postDataJSON() as { audioBase64: string }).audioBase64, "base64"));
+    // A stalled upload: never answered (the console gives up on it).
+    if (posted.length <= (opts.stall ?? 0)) return;
     await r.fulfill({ json: { text: opts.heard ?? "打开走廊灯。", ref: "ref-1" } });
   });
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -58,8 +60,38 @@ test("records from the microphone, sends 16 kHz mono WAV and adds what was said 
   // The speech server is woken as recording starts, and the console reports its side of the timing.
   expect(posted.warms.length).toBeGreaterThanOrEqual(1);
   await expect.poll(() => posted.timings.length).toBe(1);
-  expect(posted.timings[0]).toMatchObject({ ref: "ref-1", prepareMs: expect.any(Number), roundTripMs: expect.any(Number) });
+  expect(posted.timings[0]).toMatchObject({ ref: "ref-1", prepareMs: expect.any(Number), roundTripMs: expect.any(Number), attempts: 1 });
   await page.screenshot({ path: info.outputPath("transcribed.png") });
+});
+
+test("a tap while the words come back cancels: nothing is added and nothing is said", async ({ page }, info) => {
+  const posted = await open(page, { stall: 1 });
+  const composer = page.locator(".composer"), input = page.getByRole("textbox", { name: "消息", exact: true });
+  await composer.getByRole("button", { name: "语音输入" }).click();
+  await page.waitForTimeout(1200);
+  await composer.getByRole("button", { name: /停止录音/ }).click();
+  const cancel = composer.getByRole("button", { name: "识别中，点按取消" });
+  await expect(cancel).toBeEnabled();
+  await page.screenshot({ path: info.outputPath("transcribing.png") });
+  await cancel.click();
+  const mic = composer.getByRole("button", { name: "语音输入" });
+  await expect(mic).toBeEnabled();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(input).toHaveValue("");
+  expect(posted).toHaveLength(1);
+});
+
+test("an upload that stalls is sent again, and the words still arrive", async ({ page }) => {
+  const posted = await open(page, { stall: 1 });
+  const composer = page.locator(".composer"), input = page.getByRole("textbox", { name: "消息", exact: true });
+  await composer.getByRole("button", { name: "语音输入" }).click();
+  await page.waitForTimeout(1200);
+  await composer.getByRole("button", { name: /停止录音/ }).click();
+  // The first attempt is given about ten seconds for this short clip.
+  await expect(input).toHaveValue("打开走廊灯。", { timeout: 30_000 });
+  expect(posted).toHaveLength(2);
+  await expect.poll(() => posted.timings.length).toBe(1);
+  expect(posted.timings[0]).toMatchObject({ attempts: 2 });
 });
 
 test("says so when nothing was heard", async ({ page }) => {

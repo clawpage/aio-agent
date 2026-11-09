@@ -9,6 +9,7 @@ export const voice = {
   failed: "语音识别失败",
   stopRecording: (clock: string) => `停止录音（${clock}）`,
   transcribing: "识别中…",
+  cancelTranscribing: "识别中，点按取消",
   input: "语音输入",
   stopAndTranscribe: "停止并识别",
   short: "语音",

@@ -663,7 +663,8 @@ export function createApiRouter(context: AppContext): Router {
     const ms = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 && v < 600_000 ? Math.round(v) : null);
     if (entry && entry.user === getUser(db, ctxOf(req).session!.ownerId)?.username) {
       voiceTimings.delete(req.body.ref);
-      const client = { prepareMs: ms(req.body.prepareMs), roundTripMs: ms(req.body.roundTripMs) };
+      const attempts = Number.isInteger(req.body.attempts) && req.body.attempts >= 1 && req.body.attempts <= 5 ? req.body.attempts as number : null;
+      const client = { prepareMs: ms(req.body.prepareMs), roundTripMs: ms(req.body.roundTripMs), attempts };
       const serverMs = entry.fields.serverMs ?? 0;
       const networkMs = client.roundTripMs === null ? null : Math.max(0, client.roundTripMs - serverMs);
       log.info("voice input timing", { account: entry.user, ...entry.fields, ...client, networkMs });

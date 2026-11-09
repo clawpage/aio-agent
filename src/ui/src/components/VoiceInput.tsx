@@ -7,6 +7,13 @@ import { haptic } from "../haptics";
 import { tapProps } from "../tap";
 
 const WARM_EVERY_MS = 4_000;
+/**
+ * An upload that stalls on a phone's network (once 47 s for 320 KB that usually take a fraction of a
+ * second) is sent again on a new request: given this long, plus a second for every 50 KB, then once more.
+ */
+const ATTEMPT_MS = 8_000;
+const ATTEMPT_MS_PER_KB = 20;
+const ATTEMPTS = 2;
 
 /** Why the microphone would not open, in words the user can act on. */
 function micError(err: unknown): string {
@@ -29,6 +36,8 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   const [state, setState] = useState<"idle" | "starting" | "recording" | "transcribing">("idle");
   const [seconds, setSeconds] = useState(0);
   const recording = useRef<Recording | null>(null);
+  /** Stops the transcription under way: a tap while it loads cancels it. */
+  const transcription = useRef<AbortController | null>(null);
   /** When the microphone started listening. */
   const startedAt = useRef(0);
   const button = useRef<HTMLButtonElement>(null);
@@ -40,7 +49,7 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     let live = true;
     // Only in a language the speech server hears; an older control plane lists none and allows any.
     api.asr().then(r => { if (live) setEnabled(r.enabled && (!r.locales || r.locales.includes(locale))); }).catch(() => { /* an older control plane: no voice input */ });
-    return () => { live = false; recording.current?.cancel(); recording.current = null; };
+    return () => { live = false; recording.current?.cancel(); recording.current = null; transcription.current?.abort(); };
   }, []);
 
   const finish = async () => {
@@ -50,17 +59,39 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
     if (Date.now() - startedAt.current < MIN_SECONDS * 1000) { r.cancel(); setState("idle"); return; }
     haptic("tap");
     setState("transcribing");
+    const cancel = new AbortController();
+    transcription.current = cancel;
     try {
       const stopped = performance.now();
       const audio = r.stop();
       const sent = performance.now();
-      const { text, ref } = await api.transcribe(audio, r.microphone);
-      if (ref) void api.asrTiming({ ref, prepareMs: sent - stopped, roundTripMs: performance.now() - sent }).catch(() => { /* only a measurement */ });
+      const limit = ATTEMPT_MS + Math.round(audio.byteLength / 1024) * ATTEMPT_MS_PER_KB;
+      let attempts = 0, answer: { text: string; ref?: string } | null = null;
+      while (!answer) {
+        attempts += 1;
+        const attempt = new AbortController();
+        const stop = () => attempt.abort();
+        cancel.signal.addEventListener("abort", stop);
+        const timer = setTimeout(stop, limit);
+        try {
+          answer = await api.transcribe(audio, r.microphone, attempt.signal);
+        } catch (err) {
+          // Cancelled by the person, or the last attempt ran out: no retry.
+          if (cancel.signal.aborted || !attempt.signal.aborted || attempts >= ATTEMPTS) throw err;
+        } finally {
+          clearTimeout(timer);
+          cancel.signal.removeEventListener("abort", stop);
+        }
+      }
+      const { text, ref } = answer;
+      if (ref) void api.asrTiming({ ref, prepareMs: sent - stopped, roundTripMs: performance.now() - sent, attempts }).catch(() => { /* only a measurement */ });
       if (text) callbacks.current.onText(text);
       else callbacks.current.onError(t.voice.notHeard);
     } catch (err) {
-      callbacks.current.onError(err instanceof Error ? err.message : t.voice.failed);
+      // A cancel says nothing: the person asked for it.
+      if (!cancel.signal.aborted) callbacks.current.onError(err instanceof DOMException && err.name === "AbortError" ? t.voice.failed : err instanceof Error ? err.message : t.voice.failed);
     } finally {
+      if (transcription.current === cancel) transcription.current = null;
       setState("idle");
     }
   };
@@ -116,11 +147,12 @@ export function VoiceButton({ disabled, onText, onError }: { disabled: boolean; 
   const listening = state === "recording";
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   return <button ref={button} type="button" className={`ghost voice-button${state === "idle" ? "" : ` ${state}`}`} data-testid="voice-button"
-    disabled={(disabled && !listening) || state === "starting" || state === "transcribing"}
-    aria-pressed={listening} aria-label={listening ? t.voice.stopRecording(clock) : state === "transcribing" ? t.voice.transcribing : t.voice.input} title={listening ? t.voice.stopAndTranscribe : t.voice.input}
-    {...tapProps(() => void (listening ? finish() : start()))}>
-    {/* The microphone stays while it opens and while the words come back (the loading mark is unreadable at this size). */}
-    <span className="voice-glyph">{listening ? <ComposerIcon kind="stop"/>
+    disabled={(disabled && !listening && state !== "transcribing") || state === "starting"}
+    aria-pressed={listening} aria-label={listening ? t.voice.stopRecording(clock) : state === "transcribing" ? t.voice.cancelTranscribing : t.voice.input}
+    title={listening ? t.voice.stopAndTranscribe : state === "transcribing" ? t.voice.cancelTranscribing : t.voice.input}
+    {...tapProps(() => void (listening ? finish() : state === "transcribing" ? transcription.current?.abort() : start()))}>
+    {/* The microphone stays while it opens; while the words come back a cross inside the turning arc says a tap cancels. */}
+    <span className="voice-glyph">{listening ? <ComposerIcon kind="stop"/> : state === "transcribing" ? <ComposerIcon kind="close"/>
       : <svg className="composer-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>}</span>
     <span className="composer-button-label">{listening ? clock : state === "transcribing" ? t.voice.transcribing : t.voice.short}</span>
   </button>;
