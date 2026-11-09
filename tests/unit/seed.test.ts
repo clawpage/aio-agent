@@ -271,6 +271,10 @@ describe("sandbox workspace seed", () => {
     expect(flat).toContain("Anything that has to be added, removed or redrawn goes to image_generate, in the first attempt");
     expect(flat).toContain("the next attempt is image_generate on that part, not another retouch");
     expect(flat).toContain("everything that makes a paste look pasted is image_generate's work");
+    // A composite starts from a clean background, and no edited photo goes out before a flaw review comes back clean.
+    expect(flat).toContain("**A clean background first.**");
+    expect(flat).toContain("## No flaws before delivery");
+    expect(flat).toContain("**Deliver only a clean list.**");
     // The reference files go next to SKILL.md for both executors, and SKILL.md says when to read each one.
     const names = Object.keys(PHOTO_REFERENCES).sort();
     expect(names).toEqual(["background-compositing.md", "id-photos.md", "lightcraft-controls.md", "local-retouch.md", "looks-and-grading.md",

@@ -3452,19 +3452,51 @@ tightly around that part only and done the same way; say which part was AI-made.
 ## Putting people from one photo into another (合成, 把这几个人P到那张图上, 换人)
 
 The people (and their faces) are pasted from their own photo; everything that makes a paste look pasted is image_generate's work,
-not yours. Never fix halos, white or dark edges, seams, color or light mismatch, shadows, or background text and objects the paste
-broke with your own pixel scripts (blurs, feathering, color transfer): that is what made such composites come back again and again.
+not yours. Never fill, stretch, blur, feather or color-match pixels with your own scripts to hide a seam, a halo or a gap: that is what
+left smeared streaks, broken banner text and white fringes in composites that came back again and again. Do the steps in this order and
+check each one before the next.
 
-1. Paste the people at their place (your own script is fine for this one step: their cut-out at the right size and position).
-2. In the same attempt, before delivering, run markup on the pasted result around everything that is not the people's own pixels or
-   does not fit: every outline (hair, shoulders, arms; \`--lasso\` or a chain of \`--circle\` along it, outside the face), the background the
-   old people left or the paste covered (text, signs, edges of furniture), and the floor for contact shadows. Never mark a face.
-3. image_generate with that input and markup: "Blend the people into the scene inside the red marks: remove white or dark halos,
-   continue the background and any text naturally, match light, color and shadows to the scene. Keep the faces and everything outside
-   the marks exactly the same. Remove the red marks." Then merge onto the pasted result.
-4. Light and color of the people as a whole (still brighter or warmer than the scene): retouch the merged result with \`--local people …\`.
-5. check the faces against their original photo (\`--box\` per face), look at every outline at 100 %, then deliver. A follow-up about
-   edges, color or broken background is a new markup on the latest result and another image_generate, not a script.
+1. **A clean background first.** If the target photo has people (or things) where the new people go, remove them before pasting anyone:
+   markup generously around each of them (whole body, hair, and their shadows and reflections on the floor), image_generate: "Remove the
+   people inside the red marks and rebuild what was behind them: continue the banner, its text, logos and lines exactly as in the rest of
+   the picture, the floor tiles, joints and reflections. Keep everything outside the marks exactly the same. Remove the red marks.", then
+   merge. Look at the rebuilt area at 100 %: text that reads, straight lines that continue, no smears, ghosts of the removed people or
+   leftover shoes and shadows. Redo this step until it is clean; the people go on top of a clean background only.
+2. **Paste** each person from their own photo onto it: whole body down to the shoes, in their order, sized and placed like the people
+   who were there (head height, feet on the same floor line), with their own pixels. Your own script is fine for this step only.
+3. **Blend with image_generate** on the pasted result: markup along every outline (hair, ears, shoulders, arms, gaps between legs and
+   between people; \`--lasso\` or a chain of \`--circle\`, never over a face) and the floor around every pair of feet, and ask: "Blend the
+   people into the scene inside the red marks: remove white, grey or dark fringes and leftover bits of their old background, continue the
+   background behind them naturally, add soft contact shadows and floor reflections matching the scene's light. Keep the faces, the people
+   and everything outside the marks exactly the same. Remove the red marks." Then merge.
+4. **Match their light** to the scene (an indoor photo pasted outdoors is warmer and brighter; overcast daylight is soft and cool):
+   retouch the merged result with \`--local people …\` (exposure, warmth, contrast) until skin, clothes and the scene look lit by the same light.
+5. **check the faces** against their own photo (\`--box\` per face), then the flaw review below.
+
+A follow-up about edges, color, shadows or broken background is a new markup on the latest result and another image_generate, and
+then the whole flaw review again, not a script.
+
+## No flaws before delivery (every edited photo: retouch, AI changes and composites)
+
+A result goes to the user only when nobody looking at it on a phone, or zoomed in, would see that it was edited. Script numbers do not
+replace looking: view the pictures yourself.
+
+1. **Make the crops**: the whole result, and 100 % crops (about 800 px) of every place that changed: every outline of a pasted, removed or
+   changed thing, every rebuilt area and the text and lines near it, hands, feet and the floor under them. View every crop.
+2. **Go through the list** for each crop, and write down every flaw with where it is:
+   - fringes or halos (white, grey, dark or colored) on hair, ears, shoulders, arms, between legs and fingers;
+   - stretched, smeared, blurred or repeated pixels, visible patches or seams, a change in grain or sharpness at a boundary;
+   - ghosts or leftovers of what was removed (a limb, a shoe, a shadow, a reflection, a strand of hair);
+   - text, logos and straight lines (banners, signs, tiles, floor joints, door frames) broken, garbled, doubled or bent where they meet a
+     person or an edited area;
+   - people who float (no contact shadow where the scene has shadows, no reflection on a wet or shiny floor), are lit from another
+     direction, are brighter, warmer or sharper than the scene, or are the wrong size or perspective for where they stand;
+   - extra, missing or merged fingers, limbs, glasses, earrings; and faces that changed (\`check\`).
+3. **Fix every flaw** with markup around it and image_generate (never with your own blur, stretch or clone scripts), merge, and go back
+   to step 1 for the whole picture: a fix can break something next to it. Up to 4 rounds.
+4. **Deliver only a clean list.** If a flaw is still there after 4 rounds, deliver the best result and say plainly what is left and where,
+   in one sentence. Never call a result seamless, natural or flawless when the list is not clean. When the user points out a flaw, the
+   review missed it: after fixing it, review the whole picture again.
 
 ## More detail (read the one that applies before you start)
 
@@ -3490,6 +3522,7 @@ never deliver a full-size photo as PNG. Several photos: one retouch per photo in
    \`--background keep\` and tell the user the background of that photo could not be cleaned up automatically.
 2. **Look** at the result (and the \`cutout\` preview when the background changed): whole people, nothing left behind, no halo, skin that
    still looks like skin, colors that are not overdone. If it does not look clearly better than the original, change the options and redo.
+   After a background change, an AI change or a composite, also do the flaw review above.
 3. **Check the faces against the original**:
    \`\`\`bash
    python3 /home/gem/.codex/tools/aio-photo/aio-photo.py check <original> <result>
@@ -3806,7 +3839,8 @@ darker sky; foliage is mostly yellow and green, so darken it with both, e.g. \`b
 Read before changing a background (\`--background smooth|studio|plain|<picture>\`) and whenever an edge, a white speck or
 a floating person needs rework. The people, expressions, hands, clothes, props and framing always come from the original;
 light and color from LightCraft; cut-outs and masks may use Pillow/OpenCV. Never redraw people. A halo, seam or edge that
-one rework with the tools below does not clear is marked (markup, outside faces) and blended by image_generate, then merged.
+retouch's own options below do not clear is marked (markup, outside faces) and blended by image_generate, then merged, never
+patched with your own blur or stretch scripts; then the flaw review in SKILL.md.
 
 ## Keep the work in layers
 
