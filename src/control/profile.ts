@@ -8,9 +8,9 @@ import { loginTimezone } from "./auth/loginTimezone.js";
 
 /**
  * What a person tells about themselves (docs/FEATURES.md「个人资料」): every field optional, kept in
- * the central database (`profiles`). The executor never gets it pasted into a prompt: a copy is one
- * node of the account's personal knowledge base (domain `profile`), found with kb_search when it
- * matters, and rewritten in place whenever the profile changes.
+ * the central database (`profiles`). A copy is one node of the account's personal knowledge base
+ * (domain `profile`), rewritten in place whenever the profile changes; every execution thread starts
+ * with that domain's claims (`kbAboutPerson`), and kb_search finds them as well.
  */
 
 export const PROFILE_FIELDS = ["nickname", "preferredName", "location", "language", "occupation", "interests", "notes"] as const;

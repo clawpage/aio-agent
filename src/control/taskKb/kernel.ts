@@ -25,6 +25,7 @@ export type KbProposalType = (typeof KB_PROPOSAL_TYPES)[number];
 
 /** The domains every account starts with; the maintainer adds others (an English slug with a description). */
 export const KB_DEFAULT_DOMAINS: Record<string, string> = {
+  profile: "The person themselves: the profile they wrote, and lasting facts about them (where they live, household, work, languages, diet, the stores and services they use regularly)",
   family: "Family members, relationships and family arrangements",
   health: "Health, medical care, medicines and doctors",
   shopping: "Products, stores, orders, returns and prices",

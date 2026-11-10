@@ -175,6 +175,31 @@ export function kbBrief(db: Db, ownerId: string, query: string, budget = 800): {
   return { text, version: createHash("sha256").update(text).digest("hex").slice(0, 8), nodes };
 }
 
+/**
+ * What the knowledge base holds about the person themselves (domain `profile`: the profile they
+ * wrote, and what the maintainer keeps about them), for the start of every execution thread: what
+ * they said first, then what was observed, then what was concluded, newest first, up to a budget.
+ * Claims of a node with corrections pending are left out.
+ */
+export function kbAboutPerson(db: Db, ownerId: string, budget = 1200): { text: string; version: string } | null {
+  const rows = db.prepare(`SELECT c.text, c.certainty, n.id AS node FROM kb_claims c JOIN kb_nodes n ON n.id=c.node_id
+    WHERE n.owner_id=? AND n.domain='profile' AND n.status='active' AND c.status='active'
+    ORDER BY CASE c.certainty WHEN 'user_said' THEN 0 WHEN 'observed' THEN 1 ELSE 2 END, c.updated_at DESC, c.id`).all(ownerId) as Array<{ text: string; certainty: string; node: string }>;
+  const flagged = pendingFlags(db, ownerId, [...new Set(rows.map((r) => r.node))]);
+  const lines: string[] = [];
+  let used = 0;
+  for (const r of rows) {
+    if (flagged.get(r.node)?.length) continue;
+    const line = `- ${r.text} [${r.certainty.replace("_", " ")}]`;
+    if (used + line.length > budget) break;
+    lines.push(line);
+    used += line.length;
+  }
+  if (!lines.length) return null;
+  const text = lines.join("\n");
+  return { text, version: createHash("sha256").update(text).digest("hex").slice(0, 8) };
+}
+
 export const KB_PROPOSALS_PER_TASK = 12;
 
 export interface CheckedProposal { type: KbProposalType; task: string; text: string; reason: string; evidence: PreparedSource[] }

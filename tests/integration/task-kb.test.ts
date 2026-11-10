@@ -7,7 +7,7 @@ import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
 import { TASK_KB_POLICY, TaskKbGateway, taskKbMcpServers, taskKbThreadServers } from "../../src/control/taskKb/gateway.js";
 import { applyKbAnswer, deleteKbNode, sensitiveReason, sha256, wikiIneligible } from "../../src/control/taskKb/kernel.js";
 import { getKbNode, kbBrief, listKb, searchKb } from "../../src/control/taskKb/read.js";
-import { TaskKbMaintainer, parseAnswer } from "../../src/control/taskKb/maintainer.js";
+import { MAINTAINER_INSTRUCTIONS, TaskKbMaintainer, parseAnswer } from "../../src/control/taskKb/maintainer.js";
 import { renderKbIndex } from "../../src/control/taskKb/projection.js";
 
 type Result = { content: Array<{ text: string }>; isError?: boolean };
@@ -77,6 +77,7 @@ it("gives every account its own read-and-propose knowledge tool with no way to w
     // The person's address: standing agreements first, the family base only through its source documents, never a guess.
     expect(TASK_KB_POLICY).toContain("read that field with its kb_source");
     expect(TASK_KB_POLICY).toContain("never tells you where they live");
+    expect(TASK_KB_POLICY).toContain("Ask only when none of these gives even a city");
     expect(TASK_KB_POLICY).toContain("their home address when they state or confirm it");
     const tools = (await (await rpc(owner.taskKb!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
     expect(tools.map((t) => t.name)).toEqual(["kb_search", "kb_get", "kb_neighbors", "kb_source", "kb_propose", "kb_propose_status", "kb_libraries", "kb_library_create", "kb_library_manage", "kb_library_join", "kb_library_edit", "kb_library_history", "kb_library_undo", "history_search", "history_get", "memory_search", "memory_save", "memory_forget"]);
@@ -290,6 +291,40 @@ it("hands a new task the knowledge that matches it, once per session", async () 
     const prompt = h.codex.startedTurns.find((t) => t.text.includes("给 Roy 挑一款辅食"))!.text;
     expect(prompt).toContain("Notes from the user's personal knowledge base");
     expect(prompt).toContain("Roy 的过敏");
+  } finally {
+    gateway.close();
+    await h.shutdown();
+  }
+});
+
+it("starts every session with what is known about the person, and keeps it in the maintainer's view", async () => {
+  const { h, gateway, task, kernel, owner, container } = await setup();
+  try {
+    const a = await task("取 Target 的货", "在 Target San Jose South 取货；租的房子也在 San Jose。");
+    expect((await applyKbAnswer(kernel(), { decisions: [], ops: [
+      { op: "node", ref: "home", kind: "fact", domain: "profile", title: "owner 的住处", summary: "owner 住在 San Jose" },
+      { op: "claim", node: "home", text: "owner 住在加州 San Jose 南部（依据：租的房子和取货的门店都在那里）", certainty: "inferred", sources: [{ task: a, quote: "租的房子也在 San Jose" }] },
+      { op: "claim", node: "home", text: "owner 不吃香菜", certainty: "user_said", sources: [{ task: a, quote: "在 Target San Jose South 取货" }] },
+    ] })).ok).toBe(true);
+    // A request that shares no words with it still gets it: nothing has to match.
+    h.ctx.tasks.submit({ userId: "owner_1", text: "饿了，找点好吃的", clientMessageId: "about-1" });
+    await vi.waitFor(() => expect(h.codex.startedTurns.some((t) => t.text.includes("饿了"))).toBe(true));
+    const prompt = h.codex.startedTurns.find((t) => t.text.includes("饿了"))!.text;
+    expect(prompt).toMatch(/What is known about the user themselves \(version [0-9a-f]{8};/);
+    expect(prompt).toContain("- owner 住在加州 San Jose 南部（依据：租的房子和取货的门店都在那里） [inferred]");
+    // What the person said comes before what was concluded.
+    expect(prompt.indexOf("owner 不吃香菜 [user said]")).toBeGreaterThan(0);
+    expect(prompt.indexOf("owner 不吃香菜 [user said]")).toBeLessThan(prompt.indexOf("[inferred]"));
+    expect(TASK_KB_POLICY).toContain("take the area where they live as where they are");
+    expect(MAINTAINER_INSTRUCTIONS).toContain('keep domain "profile" complete enough that the next task need not ask');
+
+    // The maintainer sees the profile nodes with every batch, whatever the batch is about.
+    const b = await task("比较两款吸尘器", "Dyson V15 比 Shark 贵 200 美元。");
+    h.ctx.db.prepare("UPDATE kb_packets SET status='merged'").run();
+    h.ctx.db.prepare("INSERT INTO kb_packets (id, owner_id, kind, task_id, payload_json, created_at) VALUES ('kbp_about','owner_1','extract',?, '{}', 1)").run(b);
+    const codex = { maintainKb: vi.fn(async (_prompt: string) => ({ text: JSON.stringify({ decisions: [{ packet: "kbp_about", status: "rejected", note: "nothing to keep" }], ops: [] }), error: null })) };
+    await new TaskKbMaintainer({ db: h.ctx.db, cfg: owner, log: h.ctx.log, codex, container, busy: async () => false, idleState: () => "running" }).run();
+    expect(codex.maintainKb.mock.calls[0]![0]).toContain("owner 的住处");
   } finally {
     gateway.close();
     await h.shutdown();

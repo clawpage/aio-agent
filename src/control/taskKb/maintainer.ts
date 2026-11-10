@@ -58,7 +58,9 @@ const day = (ts: number | null) => (ts ? new Date(ts).toISOString().slice(0, 16)
 
 export const MAINTAINER_INSTRUCTIONS = `You are the knowledge maintainer of one person's personal knowledge base inside Clawpage Agent. You are the only one who decides what it holds. You read finished tasks and proposals from agents, and you answer with one JSON change list; the control plane checks every item and writes it. You cannot write any other way and must not try to.
 
-What belongs in it: things worth knowing the next time this person asks for something similar. People, products, stores, websites and apps they deal with (entity); subjects they keep coming back to (topic); how something is done, including the steps that worked and the pitfalls (procedure); and facts with lasting value (fact). Keep it small and reusable: skip small talk, one-off details, your own guesses presented as facts, temporary states, and anything already obvious. Never record passwords, codes, identity, card or account numbers (they are refused). Never record a guess about the person themselves, such as where they live: a place they asked about is not their home, and a claim like "probably near the user's home" will be taken as fact by the next task.
+What belongs in it: things worth knowing the next time this person asks for something similar. People, products, stores, websites and apps they deal with (entity); subjects they keep coming back to (topic); how something is done, including the steps that worked and the pitfalls (procedure); and facts with lasting value (fact). Keep it small and reusable: skip small talk, one-off details, your own guesses presented as facts, temporary states, and anything already obvious. Never record passwords, codes, identity, card or account numbers (they are refused).
+
+About the person themselves, keep domain "profile" complete enough that the next task need not ask: where they live (city and neighbourhood), who lives with them, their work, languages, what they eat or avoid, the stores and services they use regularly, their devices and vehicles. One node per aspect (for example "Where <account name> lives", written in the language of their tasks), each claim naming the person. The profile-domain nodes are always listed below: add to them, and replace a claim when the person corrects it or moves. Record what they said as user_said. Also record, as inferred, what several independent things in their own tasks establish, and say in the claim what it rests on: a rented home, a store pickup and a library visit in the same city establish that they live in that city ("<account name> lives in San Jose, California, judging by the home they rent there and the stores where they pick up orders"). Keep an inferred claim coarse (city, neighbourhood), never a street address unless they stated one. One place they asked about, a trip, or an address they ship to for someone else establishes nothing: do not write "probably near the user's home", which the next task takes as fact. When a task had to ask the person for something of this kind, or guessed it, and they answered or confirmed, record the answer here.
 
 The existing nodes most related to this batch are listed with their ids and current claims (you have no tools to search for more): when one is about the same thing, add to it instead of creating a new node. Use merge when two existing nodes are the same thing. When a new claim contradicts an existing one, write the new claim with replaces (if it is now true) or link the nodes with contradicts (if both may hold), never silently drop the old one. You may read a task's files with shell commands (cat, ls, head) under its directory.
 
@@ -281,6 +283,15 @@ export class TaskKbMaintainer {
     const { db } = this.#d;
     const seen = new Set<string>();
     const out: string[] = [];
+    const line = (id: string) => {
+      const node = getKbNode(db, this.#owner, id)!;
+      return JSON.stringify({ id: node.id, kind: node.kind, domain: node.domain, title: node.title, summary: node.summary, claims: node.claims.map((c) => ({ id: c.id, text: c.text, certainty: c.certainty })), links: node.links.map((l) => `${l.direction === "out" ? "" : "← "}${l.rel} ${l.title} (${l.node})`) });
+    };
+    // What is kept about the person themselves is always in view, so each batch adds to it instead of starting over.
+    for (const hit of searchKb(db, this.#owner, { domain: "profile", limit: 8 })) {
+      seen.add(hit.id);
+      out.push(line(hit.id));
+    }
     for (const p of packets) {
       let query = "";
       if (p.kind === "extract") {
@@ -290,10 +301,9 @@ export class TaskKbMaintainer {
         query = (JSON.parse(p.payload_json) as { text?: string }).text ?? "";
       }
       for (const hit of query ? searchKb(db, this.#owner, { query, limit: 6 }) : []) {
-        if (seen.has(hit.id) || seen.size >= 20) continue;
+        if (seen.has(hit.id) || seen.size >= 28) continue;
         seen.add(hit.id);
-        const node = getKbNode(db, this.#owner, hit.id)!;
-        out.push(JSON.stringify({ id: node.id, kind: node.kind, domain: node.domain, title: node.title, summary: node.summary, claims: node.claims.map((c) => ({ id: c.id, text: c.text, certainty: c.certainty })), links: node.links.map((l) => `${l.direction === "out" ? "" : "← "}${l.rel} ${l.title} (${l.node})`) }));
+        out.push(line(hit.id));
       }
     }
     return out.length ? `Existing nodes related to this batch:\n${out.join("\n")}` : "Existing nodes related to this batch: none yet.";

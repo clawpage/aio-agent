@@ -64,6 +64,8 @@ export interface TaskPlan {
     agreementsVersion?: string;
     /** Version of the personal-knowledge notes given to the thread with this task. */
     knowledgeVersion?: string;
+    /** The version of what is known about the person themselves that this turn's prompt carried. */
+    aboutVersion?: string;
     /** How many times a restart cut this task's turn off and it carried on in a new turn by itself. */
     restartResumes?: number;
 }
