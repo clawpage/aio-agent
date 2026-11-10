@@ -57,6 +57,8 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     image:undefined,
     // Nor its text to speech, likewise.
     tts:undefined,
+    // The execution environments are the owner's alone while they are being tried (PA_EXEC_ENVS=owner).
+    execEnvs:base.execEnvs===true&&!base.execEnvsOwnerOnly,
   };
 }
 

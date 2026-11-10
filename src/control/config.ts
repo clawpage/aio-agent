@@ -404,6 +404,8 @@ export function loadConfig(): {
    * one server, aio_env, and each turn starts with a brief of what is online, in place of aio_ios and aio_mac_native.
    */
   execEnvs?: boolean;
+  /** PA_EXEC_ENVS=owner: only the owner's runtime has them, to try them on real devices before every account gets them. */
+  execEnvsOwnerOnly?: boolean;
   /** This runtime's aio_env URL on the member gateway (EnvGateway), when execEnvs is on. */
   env?: { url: string };
   /**
@@ -548,7 +550,8 @@ export function loadConfig(): {
     ownerPassword: envStr("PA_OWNER_PASSWORD", ""),
     // Opt-in operator action: rotate the owner password and rewrite the local secret file.
     ownerPasswordReset: envStr("PA_OWNER_PASSWORD_RESET", "0") === "1",
-    execEnvs: envStr("PA_EXEC_ENVS", "0") === "1",
+    execEnvs: ["1", "owner"].includes(envStr("PA_EXEC_ENVS", "0")),
+    execEnvsOwnerOnly: envStr("PA_EXEC_ENVS", "0") === "owner",
     sandbox: {
       image: envStr("PA_SANDBOX_IMAGE", "ghcr.io/agent-infra/sandbox:1.11.0"),
       containerName: envStr("PA_SANDBOX_CONTAINER", "personal-agent-sandbox"),

@@ -232,6 +232,8 @@ so the agent cannot tell the two apart.
 
 `PA_EXEC_ENVS=1` gives executors `aio_env` and the environment brief instead of `aio_ios` and
 `aio_mac_native`. Off by default until the work below is done and verified end to end; then on.
+`PA_EXEC_ENVS=owner` turns it on for the owner's account alone, to try it on real devices first; every
+other account keeps its tools as they were.
 
 1. Control plane: environment registry, `aio_env`, adapters for old devices, the brief. (iOS first.)
 2. iPhone app: `/env/manifest`, `/env/call`, the in-app browser and files, foreground events.

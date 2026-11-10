@@ -462,5 +462,12 @@ describe("rollout without breaking anything", () => {
     expect(on.ios).toBeUndefined();
     expect(on.macNative).toBeUndefined();
     expect(codexRequirementsToml(on)).toContain(on.env!.url);
+
+    // PA_EXEC_ENVS=owner: the owner's runtime has them, every other account stays as it was.
+    const ownerOnly = memberConfig({ ...h.ctx.cfg, execEnvs: true, execEnvsOwnerOnly: true }, alice.id, 18114);
+    expect(ownerOnly.execEnvs).toBe(false);
+    gateway.provision(ownerOnly);
+    expect(envThreadServers(ownerOnly)).toEqual({});
+    expect(ownerOnly.ios?.url).toBeTruthy();
   });
 });
