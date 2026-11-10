@@ -943,11 +943,13 @@ Jev（TypeSafe System One）根据状态和选项返回选择、各选项概率�
 
 - **授权**：只有 `PA_PRINTER_ACCOUNTS` 列出的用户名可用（owner 也需列出）。现有部署授权 `owner` 与 `cr`。
 - **接入**：获准账号注册 `aio_printer`（成员网关 `/printer/<运行时令牌>/mcp`），工具为 `printer_status`（状态、缺纸卡纸、墨量、纸张）
-  与 `print_file`（工作区里的 PDF 或图片；可选页码、份数 1–20、单双面、黑白、纸张）。其他格式由执行会话先在沙箱里转成 PDF。
+  与 `print_file`（工作区里的 PDF 或图片；可选页码、份数 1–20、单双面、黑白、纸张、无边距）。其他格式由执行会话先在沙箱里转成 PDF。
 - **纸张**：打印机可同时装几种纸（如后进纸器的 Letter 普通纸与纸盒里的 4x6 相纸）。`printer_status` 按打印机报告（`media-col-ready`）列出每种纸的尺寸、
   类型与纸盒；`print_file` 的 `paper` 指定其中一种（如 `Letter`、`A4`、`4x6`）。没指定时只用普通纸，相纸只有点名才用；指定的纸没装、
   或没指定而只装了相纸时拒绝并列出现有纸张，不打印。作业同时带尺寸、纸盒与纸张类型（`media-col`），页面按所选纸的尺寸渲染。
   打印机不报告纸盒明细时退回按 `media-ready` 的纸名选择。
+- **无边距**：`print_file` 的 `borderless` 为真时打到纸边（作业的四个页边距为 0）：图片放大到盖满整张纸、超出部分裁掉，PDF 页保持原尺寸。
+  只用于打印机报告可无边距的纸（`printer_status` 标「borderless available」），否则拒绝、不打印；默认留白边，只有用户要求无边距才用。
 - **流程**：该账号自己的沙箱用 `pdftoppm` 把文件渲染成 300 dpi 的 PWG raster（`src/control/printer/scripts/pwg-raster.py`，需沙箱里的 numpy 与 Pillow），
   控制面取回后以 IPP Print-Job 发给打印机。一次最多 50 页，同一时间只发一个作业。沙箱本身不接触打印机。
 - **诚实**：打印机已停止（缺纸、卡纸等）时拒绝并说明原因；发送途中连接中断时报告“不确定是否已收到”，不自动重发。

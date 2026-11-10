@@ -20,7 +20,9 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
   let printer = { state: 3, reasons: ["none"] };
   // Photo paper in the main tray, plain Letter in the other; each listed with and without margins, as real printers do.
   const tray = (x: number, y: number, type: string, source: string) =>
-    [300, 0].map((margin) => ({ "media-size": { "x-dimension": x, "y-dimension": y }, "media-top-margin": margin, "media-type": type, "media-source": source }));
+    [300, 0].map((margin) => ({ "media-size": { "x-dimension": x, "y-dimension": y }, "media-top-margin": margin, "media-bottom-margin": margin, "media-left-margin": margin, "media-right-margin": margin, "media-type": type, "media-source": source }));
+  // The envelope feeder offers no borderless printing.
+  const envelope = { "media-size": { "x-dimension": 10477, "y-dimension": 24130 }, "media-top-margin": 300, "media-bottom-margin": 300, "media-left-margin": 300, "media-right-margin": 300, "media-type": "envelope", "media-source": "manual" };
   let trays: unknown[] = [...tray(10160, 15240, "photographic-high-gloss", "main"), ...tray(21590, 27940, "stationery", "alternate")];
   let dropPrintJob = false;
   const upstream = http.createServer(async (req, res) => {
@@ -88,7 +90,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     expect(status.isError).toBeUndefined();
     expect(status.content[0]!.text).toContain("Status: idle");
     expect(status.content[0]!.text).toContain("Ink: Black 99%, Cyan 40%");
-    expect(status.content[0]!.text).toContain("Paper: 4x6 (photo paper, main tray), Letter (plain paper, alternate tray)");
+    expect(status.content[0]!.text).toContain("Paper: 4x6 (photo paper, main tray, borderless available), Letter (plain paper, alternate tray, borderless available)");
 
     // A print: the account's own sandbox makes the pages, the printer gets them with the job's settings.
     const file = "/home/gem/workspace/tasks/t1/报告.pdf";
@@ -96,9 +98,9 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     const printed = await call("print_file", { path: file, pages: "1-2, 4", copies: 2, sides: "two-sided-long-edge", color: false });
     expect(printed.isError).toBeUndefined();
     expect(printed.content[0]!.text).toContain("3 pages × 2 copies");
-    expect(printed.content[0]!.text).toContain("on Letter (plain paper, alternate tray)");
+    expect(printed.content[0]!.text).toContain("on Letter.");
     expect(printed.content[0]!.text).toContain("Job 17");
-    expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4] } }]);
+    expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4], borderless: false } }]);
     const job = seen.find((s) => s.op === 0x0002)!;
     expect(job.attrs).toMatchObject({
       "requesting-user-name": ["owner"],
@@ -117,16 +119,36 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     asked.length = 0;
     seen.length = 0;
     const photo = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4 × 6" });
-    expect(photo.content[0]!.text).toContain("on 4x6 (photo paper, main tray)");
-    expect(asked[0]!.opts).toMatchObject({ media: "na_index-4x6_4x6in", width: 1200, height: 1800 });
+    expect(photo.content[0]!.text).toContain("on 4x6.");
+    expect(asked[0]!.opts).toMatchObject({ media: "na_index-4x6_4x6in", width: 1200, height: 1800, borderless: false });
     expect(seen.find((s) => s.op === 0x0002)!.collections["media-col"]).toEqual([{ "media-size": { "x-dimension": 10160, "y-dimension": 15240 }, "media-source": "main", "media-type": "photographic-high-gloss" }]);
+
+    // Borderless: the pages cover the sheet and the job asks for no margins; refused where the printer offers none.
+    asked.length = 0;
+    seen.length = 0;
+    const edge = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4x6", borderless: true });
+    expect(edge.content[0]!.text).toContain("on 4x6, borderless.");
+    expect(asked[0]!.opts).toMatchObject({ width: 1200, height: 1800, borderless: true });
+    expect(seen.find((s) => s.op === 0x0002)!.collections["media-col"]).toEqual([
+      { "media-size": { "x-dimension": 10160, "y-dimension": 15240 }, "media-source": "main", "media-type": "photographic-high-gloss", "media-top-margin": 0, "media-bottom-margin": 0, "media-left-margin": 0, "media-right-margin": 0 },
+    ]);
+    const before = trays;
+    trays = [envelope];
+    asked.length = 0;
+    seen.length = 0;
+    const noEdge = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "104.77x241.3mm", borderless: true });
+    expect(noEdge.isError).toBe(true);
+    expect(noEdge.content[0]!.text).toContain("does not offer borderless printing");
+    expect(asked).toEqual([]);
+    expect(seen.some((s) => s.op === 0x0002)).toBe(false);
+    trays = before;
 
     // A paper that is not loaded is refused with what is; so is a document when only photo paper is loaded.
     asked.length = 0;
     seen.length = 0;
     const missing = await call("print_file", { path: file, paper: "A4" });
     expect(missing.isError).toBe(true);
-    expect(missing.content[0]!.text).toContain("A4 paper is not loaded; nothing was printed. Loaded now: 4x6 (photo paper, main tray), Letter (plain paper, alternate tray)");
+    expect(missing.content[0]!.text).toContain("A4 paper is not loaded; nothing was printed. Loaded now: 4x6 (photo paper, main tray, borderless available), Letter (plain paper, alternate tray, borderless available)");
     trays = tray(10160, 15240, "photographic-high-gloss", "main");
     const photoOnly = await call("print_file", { path: file });
     expect(photoOnly.isError).toBe(true);
@@ -188,6 +210,9 @@ it("reads page lists the way people write them", () => {
   expect(() => parsePages("1-100")).toThrow("50");
 });
 
+/** The first pixel of a gray PWG raster's first page: after the header, a line repeat count, then a run and its pixel. */
+const PWG_FIRST_PIXEL = "import sys; d=open(sys.argv[1],'rb').read(); i=4+1796+1; n=d[i]; print(d[i+1])";
+
 const python = spawnSync("python3", ["-c", "import numpy, PIL"]).status === 0;
 
 it.skipIf(!python)("turns a picture into a PWG raster page the printer understands", () => {
@@ -207,6 +232,18 @@ it.skipIf(!python)("turns a picture into a PWG raster page the printer understan
     expect([header.readUInt32BE(272), header.readUInt32BE(368)]).toEqual([1, 1]); // duplex, tumble
     expect([header.readUInt32BE(372), header.readUInt32BE(376), header.readUInt32BE(388), header.readUInt32BE(400)]).toEqual([2550, 3300, 8, 18]);
     expect(header.subarray(1732, 1750).toString()).toBe("na_letter_8.5x11in");
+
+    // With margins the picture leaves the edge of the sheet white; borderless, it covers the sheet.
+    const corner = (file: string) => {
+      const page = spawnSync("python3", ["-c", PWG_FIRST_PIXEL, file]);
+      return Number(page.stdout.toString().trim());
+    };
+    expect(corner(out)).toBe(255);
+    const edge = path.join(dir, "edge.pwg");
+    const borderless = spawnSync("python3", ["-", png, edge, "sgray", "one-sided", "1200", "1800", "na_index-4x6_4x6in", "", "borderless"], { input: script });
+    expect(JSON.parse(borderless.stdout.toString().trim())).toEqual({ ok: true, pages: 1 });
+    expect(fs.readFileSync(edge).readUInt32BE(4 + 372)).toBe(1200);
+    expect(corner(edge)).toBeLessThan(255);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

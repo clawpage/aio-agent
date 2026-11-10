@@ -2,7 +2,8 @@
 
 Runs inside the account's sandbox (python3 -), with fixed argv from the control
 plane: source, output, color space (srgb|sgray), sides, page width/height in
-pixels at 300 dpi, the PWG media name, and the PDF pages to print ("" = all).
+pixels at 300 dpi, the PWG media name, the PDF pages to print ("" = all), and
+"borderless" when the sheet is printed to its edges.
 Prints one JSON line: {"ok": true, "pages": n} or {"ok": false, "message": ...}.
 
 PWG raster (PWG 5102.4): "RaS2", then per page a 1796-byte big-endian header and
@@ -77,13 +78,14 @@ def picture(src):
     yield im, True
 
 
-def place(im, width, height, gray, fit):
+def place(im, width, height, gray, fit, borderless):
     """The page as a white sheet of exactly width x height with the content centred."""
     im = im.convert("L" if gray else "RGB")
     if (im.width > im.height) != (width > height) and im.width != im.height:
         im = im.rotate(90, expand=True)
-    room_w, room_h = (width - 2 * IMAGE_MARGIN, height - 2 * IMAGE_MARGIN) if fit else (width, height)
-    scale = min(room_w / im.width, room_h / im.height)
+    room_w, room_h = (width - 2 * IMAGE_MARGIN, height - 2 * IMAGE_MARGIN) if fit and not borderless else (width, height)
+    # A borderless picture covers the whole sheet; what hangs over the edge is cropped by the paste below.
+    scale = (max if fit and borderless else min)(room_w / im.width, room_h / im.height)
     # A rendered PDF page keeps its size unless it is larger than the paper; a picture fills the page.
     if fit or scale < 1:
         im = im.resize((max(1, round(im.width * scale)), max(1, round(im.height * scale))), Image.LANCZOS)
@@ -169,6 +171,7 @@ def write_page(out, pixels, gray, sides, back, total, media):
 
 def main():
     src, dest, space, sides, width, height, media, pages = sys.argv[1:9]
+    borderless = sys.argv[9:10] == ["borderless"]
     gray = space == "sgray"
     width, height = int(width), int(height)
     wanted = [int(p) for p in pages.split(",") if p]
@@ -183,7 +186,7 @@ def main():
         with open(dest, "wb") as out:
             out.write(b"RaS2")
             for index, (im, fit) in enumerate(source):
-                pixels = place(im, width, height, gray, fit)
+                pixels = place(im, width, height, gray, fit, borderless)
                 # This printer's back side is rotated: on a long-edge flip, every back page is drawn upside down.
                 back = sides == "two-sided-long-edge" and index % 2 == 1
                 if back:
