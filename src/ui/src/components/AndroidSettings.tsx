@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { DeviceLink } from "../types";
 import { locale, t } from "../i18n";
-import { ANDROID_ABILITIES, askDeviceTools, hasDeviceTools, listenDeviceTools, type Ability, type NativeTools, type SharedPhoto } from "../deviceTools";
+import { ANDROID_ABILITIES, askDeviceTools, hasDeviceTools, listenDeviceTools, type Ability, type NativeTools, type PhoneControl, type SharedPhoto } from "../deviceTools";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
@@ -152,8 +152,9 @@ export function AndroidSettings() {
             </>}
           </li>;
         })}
+        {native.control && <PhoneControlItem control={native.control} busy={busy} act={(action) => void change(() => askDeviceTools({ type: "control", action }))} />}
       </ul>}
-      {inApp && thisPhone && native && <p className="muted tiny" role="status">{t.app.android.state[native.state]} · {t.app.android.foreground}</p>}
+      {inApp && thisPhone && native && <p className="muted tiny" role="status">{t.app.android.state[native.state]}{native.control?.state === "running" ? "" : ` · ${t.app.android.foreground}`}</p>}
       {error && <p className="banner error" role="alert">{error}</p>}
       {others.length > 0 && <ul className="invite-list">
         {others.map((l) => (
@@ -171,5 +172,29 @@ export function AndroidSettings() {
         ))}
       </ul>}
     </section>
+  );
+}
+
+/**
+ * The side-loaded app's other apps and screen (PhoneControl.kt): paired once with the phone's own wireless debugging
+ * (the code goes into the app's notification), then started and stopped here or from that notification. The Play
+ * app has none, and says nothing of it.
+ */
+function PhoneControlItem({ control, busy, act }: { control: PhoneControl; busy: boolean; act: (action: "pair" | "start" | "stop") => void }) {
+  const words = t.app.android.control;
+  const running = control.state === "running";
+  return (
+    <li aria-label={words.title}>
+      <strong>{words.title}</strong>
+      <span className="muted tiny">{words.description}</span>
+      {!control.paired && <span className="muted tiny">{words.steps}</span>}
+      <span className="muted tiny" role="status">{words.state[control.state]}</span>
+      {control.error && <p className="banner error" role="alert">{words.errors[control.error]}</p>}
+      <div className="invite-actions">
+        {!control.paired && <button type="button" disabled={busy || control.state === "connecting"} onClick={() => act("pair")}>{words.pair}</button>}
+        {control.paired && !running && <button type="button" disabled={busy || control.state === "connecting"} onClick={() => act("start")}>{words.start}</button>}
+        {running && <button type="button" disabled={busy} onClick={() => act("stop")}>{words.stop}</button>}
+      </div>
+    </li>
   );
 }

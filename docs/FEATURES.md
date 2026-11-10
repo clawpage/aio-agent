@@ -1086,6 +1086,17 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
   选择时记下拍摄时间（选择器给的 `DATE_TAKEN`，没有时取 EXIF）、宽高（按 EXIF 方向）、视频时长；分享列表存在 no-backup 目录（`shared-photos.json`）。`photos_list` 按日期、媒体类型过滤（没有收藏信息，`favorite` 恒为 false，不带位置），`photos_get` 每次最多 5 张，缩到最长边 1600 以内（视频取一帧），每张 JPEG 不超过 1.4 MB（5 张两次 base64 后仍在一条消息以内）。
   用户在配置页移除时连同授权一起撤回；原图被用户从图库删掉后，`photos_get` 把它列为找不到。
 
+#### 侧载版：其他 App 和屏幕
+
+侧载版 Android App（`AIO_ANDROID_DIST=full` 构建，应用 id `ai.clawpage.agent.full`，可与 Play 版并存；代码在 `gen/android/app/src/full/`，设计见 `docs/EXEC-ENVS.md`「The side-loaded Android app」）在上面这些之外多两项能力：`apps`（`apps_list` / `app_open` / `app_close`）和 `screen`（`screen_read` / `screen_tap` / `screen_type` / `screen_swipe` / `screen_key` / `screen_shot`），回答的文字与同一台手机用 USB 接在 Mac 上时（mobile-mcp）一字不差（`apps_list` 的顺序除外）。Play 版没有这些，也不显示下面的配置项。
+
+- **配对一次**（Android 11+）：配置页「Android 手机」最下面「其他 App 和屏幕」→「配对」：App 申请通知权限、发出一条带输入框的通知，并打开开发者选项。用户打开「无线调试」、点「使用配对码配对设备」，在通知里点「输入配对码」填六位数字（对话框保持打开）。App 用 mDNS 找到本机的配对端口，以自己的 adb 客户端经 127.0.0.1 配对，再连上本机 adbd，确认是 shell 用户（uid 2000）后给自己授予 `WRITE_SECURE_SETTINGS`（之后无线调试由 App 自己开关），读出 adb 序列号，从自己的 APK 以 shell 身份启动控制程序（`ShellHelper`），然后断开 adb。
+- **运行中**：前台服务的通知「AI 可以使用这台手机」常驻，带「停止」；App 退到后台连接也不断，清单里 `foreground` 为 false、不再列出 `browser`（浏览器是控制台上的小窗），`apps` / `screen` 只在控制程序应答时列出；清单的 `aliases` 带 adb 序列号，同一台手机同时接在 Mac 的 USB 上时仍是一个环境，优先经 App，App 不在时经 Mac。
+- **控制程序**只监听 `127.0.0.1`，只接受 App 自己的 uid（按内核的 `/proc/net/tcp` 判断，别的 uid 连上即断开，带对令牌也不行），再双向用 HMAC 证明持有启动时给的令牌；每次只执行一条参数列表，不拼 shell 命令；收到「停止」或 30 分钟没有 App 连接时退出。
+- **不代输密码**：焦点在密码框时 `screen_type` 拒绝，请用户自己输入（`PhoneTools.refusal` 是唯一的拦截点，以后在手机上确认付款、发送等也放在这里）。中文经剪贴板粘贴输入（会覆盖剪贴板内容）。
+- **停止**：通知或配置页的「停止」结束控制程序并关闭无线调试；之后配置页「开始」由 App 自己打开无线调试、重新连接并启动，不需要再配对。**解除连接**（关掉第一个开关、手机被移除、换账号登录）时还删除 adb 密钥，并在 3 秒后经控制程序撤回 `WRITE_SECURE_SETTINGS`。
+- **还没有**：隐藏的虚拟屏幕（App 现在在手机自己的屏幕上运行，用户看得到）、实时画面、重启后自动恢复、正式签名与下载渠道。
+
 ### Clawpages（可分享、可存数据的页面）
 
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录

@@ -37,10 +37,12 @@ async function openSettings(page: Page, mobile: boolean, entry = true) {
 /**
  * The app's web message listener (DeviceTools.kt): records what the console sends and answers out of band with
  * its state, repeating the message's `seq`; anything it does not know is refused. Android allows the calendar
- * when asked unless `denyCalendar`; the photo picker returns two photos.
+ * when asked unless `denyCalendar`; the photo picker returns two photos. `full` is the side-loaded app: it also has the
+ * phone's control (PhoneControl.kt), which pairs once the person types the code into its notification (a moment after
+ * `pair` here) and is then started and stopped.
  */
-async function appBridge(page: Page, opts: { denyCalendar?: boolean } = {}) {
-  await page.addInitScript((denyCalendar) => {
+async function appBridge(page: Page, opts: { denyCalendar?: boolean; full?: boolean } = {}) {
+  await page.addInitScript(({ denyCalendar, full }) => {
     const sent: Array<Record<string, unknown>> = [];
     (window as unknown as { __sent: typeof sent }).__sent = sent;
     const listeners: Array<(event: { data: string }) => void> = [];
@@ -49,7 +51,9 @@ async function appBridge(page: Page, opts: { denyCalendar?: boolean } = {}) {
     const state = {
       linked: false, linkId: null as string | null, state: "off", name: "Pixel 8",
       abilities: { photos: { enabled: false, permission: "authorized", shared: 0 }, calendar: { enabled: false, permission: "notDetermined" } },
+      ...(full ? { control: { state: "off", paired: false, error: null as string | null, wirelessDebugging: false } } : {}),
     };
+    const publish = () => window.dispatchEvent(new CustomEvent("aio-device-tools", { detail: structuredClone(state) }));
     const answer = (body: unknown) => setTimeout(() => listeners.forEach((l) => l({ data: JSON.stringify(body) })), 5);
     (window as unknown as { aioDeviceTools: unknown }).aioDeviceTools = {
       addEventListener: (type: string, listener: (event: { data: string }) => void) => { if (type === "message") listeners.push(listener); },
@@ -79,6 +83,22 @@ async function appBridge(page: Page, opts: { denyCalendar?: boolean } = {}) {
             state.abilities.photos.shared = photos.length;
             break;
           case "photosShared": extra.photos = photos; break;
+          case "control": {
+            const control = (state as { control?: { state: string; paired: boolean; wirelessDebugging: boolean } }).control;
+            if (!control) return answer({ error: "unknown", seq: msg.seq });
+            const action = (msg as unknown as { action: string }).action;
+            if (action === "pair") {
+              control.state = "pairing";
+              // The person types the code into the notification.
+              setTimeout(() => { Object.assign(control, { state: "running", paired: true, wirelessDebugging: true }); publish(); }, 300);
+            }
+            if (action === "stop") Object.assign(control, { state: "stopped", wirelessDebugging: false });
+            if (action === "start") {
+              control.state = "connecting";
+              setTimeout(() => { Object.assign(control, { state: "running", wirelessDebugging: true }); publish(); }, 300);
+            }
+            break;
+          }
           case "photosRemove":
             photos = photos.filter((p) => !msg.ids!.includes(p.id));
             state.abilities.photos.shared = photos.length;
@@ -88,7 +108,7 @@ async function appBridge(page: Page, opts: { denyCalendar?: boolean } = {}) {
         answer({ ...structuredClone(state), ...extra, seq: msg.seq });
       },
     };
-  }, opts.denyCalendar ?? false);
+  }, { denyCalendar: opts.denyCalendar ?? false, full: opts.full ?? false });
 }
 
 const sentBy = (page: Page) => () => page.evaluate(() => (window as unknown as { __sent: Array<Record<string, unknown>> }).__sent.map(({ seq: _seq, ...rest }) => rest));
@@ -134,8 +154,33 @@ test("inside the Android app, one switch links this phone for the account signed
   await expect.poll(() => calls).toContain("DELETE /api/device-links/dlink_android");
   await expect.poll(sent).toContainEqual({ type: "unlink" });
   await expect(card).not.toContainText("已连接");
-  // Nothing iPhone-only was asked of the server.
+  // Nothing iPhone-only was asked of the server, and the Play app has no control of other apps to offer.
   expect(calls).not.toContain("GET /api/ios-device");
+  await expect(card).not.toContainText("其他 App 和屏幕");
+});
+
+test("inside the side-loaded Android app, other apps and the screen are paired once, then started and stopped", async ({ page }, info) => {
+  await appBridge(page, { full: true });
+  await mockConsole(page, { conversations: [] });
+  await mockLinks(page, []);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  const sent = sentBy(page);
+  const card = page.getByRole("region", { name: "Android 手机" });
+  const control = card.getByRole("listitem", { name: "其他 App 和屏幕" });
+  await expect(control).toContainText("未配对");
+  await expect(control).toContainText("使用配对码配对设备");
+  await control.getByRole("button", { name: "配对" }).click();
+  await expect.poll(sent).toContainEqual({ type: "control", action: "pair" });
+  // Paired from the notification: the app says so by itself, and the steps go.
+  await expect(control.getByRole("status")).toHaveText("运行中：AI 可以使用其他 App 和屏幕");
+  await expect(control).not.toContainText("使用配对码配对设备");
+  await card.screenshot({ path: info.outputPath("android-phone-control.png") });
+  await control.getByRole("button", { name: "停止" }).click();
+  await expect(control.getByRole("status")).toHaveText("已停止");
+  await control.getByRole("button", { name: "开始" }).click();
+  await expect(control.getByRole("status")).toHaveText("运行中：AI 可以使用其他 App 和屏幕");
+  expect(await sent()).toContainEqual({ type: "control", action: "stop" });
+  expect(await sent()).toContainEqual({ type: "control", action: "start" });
 });
 
 test("inside the Android app, the calendar and the photos the person picks are turned on one by one, the first one linking the phone", async ({ page }, info) => {

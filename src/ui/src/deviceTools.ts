@@ -25,7 +25,13 @@ export interface NativeTools {
   abilities: Partial<Record<Ability, { enabled: boolean; permission: Permission; shared?: number }>>;
   /** Android, answering `photosShared`: the shared photos, with small copies to recognize them by. */
   photos?: SharedPhoto[];
+  /** The side-loaded Android app only (PhoneControl.kt): other apps and the screen, over its own wireless debugging. */
+  control?: PhoneControl;
 }
+
+export type ControlState = "off" | "pairing" | "connecting" | "running" | "stopped";
+export type ControlError = "code" | "pairing" | "pairing_port" | "not_paired" | "wireless_debugging" | "no_adb" | "not_shell" | "adb" | "helper";
+export interface PhoneControl { state: ControlState; paired: boolean; error: ControlError | null; wirelessDebugging: boolean }
 
 export interface SharedPhoto { id: string; video: boolean; thumb: string | null }
 
@@ -34,7 +40,8 @@ type Message =
   | { type: "photosRemove"; ids: string[] }
   | { type: "account"; account: string | null }
   | { type: "link"; token: string; linkId: string; account: string }
-  | { type: "enable" | "disable"; ability: Ability };
+  | { type: "enable" | "disable"; ability: Ability }
+  | { type: "control"; action: "pair" | "start" | "stop" };
 /** Messages are JSON strings. iOS: a reply handler whose promise is the state, as JSON. */
 type WebkitBridge = { postMessage(message: string): Promise<string> };
 /** Android: a web message listener that answers with a message repeating the `seq` it was sent with. */
