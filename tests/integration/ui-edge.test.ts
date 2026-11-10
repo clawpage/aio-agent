@@ -73,6 +73,15 @@ describe("UI edge", () => {
     expect(gone.status).toBe(404);
     expect(await gone.text()).toBe("");
     expect(gone.headers.get("cache-control")).toBe("no-store");
+    // Its stylesheet is the exception: a tab restored weeks later has the old page and script but not the styles,
+    // and is told to reload instead of standing there unstyled.
+    const sheet = await fetch(`${base}/assets/index-OLDBUILD.css`);
+    expect(sheet.status).toBe(200);
+    expect(sheet.headers.get("content-type")).toContain("text/css");
+    expect(sheet.headers.get("cache-control")).toBe("no-store");
+    const css = await sheet.text();
+    expect(css).toContain("body > * { display: none !important; }");
+    expect(css).toContain("Reload it to continue");
     expect((await fetch(`${base}/sw.js`)).headers.get("cache-control")).toBe("no-cache");
     // Dot segments are resolved inside the build; an encoded slash cannot climb out of it.
     expect(await (await fetch(`${base}/%2e%2e/%2e%2e/etc/passwd`)).text()).toContain("<title>一站</title>");

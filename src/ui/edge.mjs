@@ -35,6 +35,17 @@ const TYPES = {
 /** Hop-by-hop headers never cross a proxy. */
 const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-encoding", "te", "trailer", "upgrade"]);
 
+/**
+ * The stylesheet a page from a build that is gone gets: nothing of the page, one line asking to reload it.
+ * The colors are copies of --bg and --muted (src/ui/src/theme.css), as in index.html.
+ */
+const STALE_PAGE_CSS = `html, body { margin: 0; background: #131219; overflow: hidden; }
+body > * { display: none !important; }
+body::before { content: "This page is out of date. Reload it to continue."; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; font: 16px/1.6 -apple-system, system-ui, sans-serif; color: #9d98ae; }
+:lang(zh) body::before { content: "页面已过期，请刷新后继续使用。"; }
+@media (prefers-color-scheme: light) { html, body { background: #f5f4f8; } body::before { color: #6b6780; } }
+`;
+
 export function createEdge({ dist, control, workspaceOrigin = "", log = () => undefined }) {
   const root = path.resolve(dist);
   const upstream = new URL(control);
@@ -160,7 +171,11 @@ export function createEdge({ dist, control, workspaceOrigin = "", log = () => un
     // A build file that is not here is gone, not a console route: the page in its place would be run
     // as a script (and kept by the service worker) by a console from an older build.
     if (url.pathname.startsWith("/assets/")) {
-      res.writeHead(404, { "cache-control": "no-store" }).end();
+      // Only a page from an older build asks for a stylesheet that is gone (a browser tab restored from its own
+      // cache weeks later still has the page and script, not the styles): it gets a sheet that says to reload,
+      // in place of an unstyled console that no longer fits the service.
+      if (url.pathname.endsWith(".css")) res.writeHead(200, { "content-type": "text/css; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" }).end(req.method === "HEAD" ? undefined : STALE_PAGE_CSS);
+      else res.writeHead(404, { "cache-control": "no-store" }).end();
       return;
     }
     // Every other path is a console route (/u/<name>, ...): the app itself decides.
