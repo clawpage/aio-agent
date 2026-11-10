@@ -541,6 +541,20 @@ CREATE TABLE IF NOT EXISTS decision_events (
 );
 CREATE INDEX IF NOT EXISTS idx_decision_events_owner ON decision_events(owner_id, created_at);
 
+-- Every job handed to the home printer, with the ink levels it started from.
+CREATE TABLE IF NOT EXISTS print_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  owner_id TEXT NOT NULL,
+  file TEXT NOT NULL,
+  pages INTEGER NOT NULL,
+  copies INTEGER NOT NULL,
+  settings TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  job_id INTEGER,
+  ink TEXT NOT NULL
+);
+
 `;
 
 export function openDb(dbPath: string): Db {

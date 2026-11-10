@@ -4,6 +4,7 @@ import type http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { Config } from "../config.js";
 import type { AppContext } from "../context.js";
+import type { Db } from "../db.js";
 import type { Logger } from "../../common/logger.js";
 import { requireWorkspaceFilePath } from "../documents/paths.js";
 import { OP, TAG, ippRequest, encodeRequest, type IppCollection, type IppResponse } from "./ipp.js";
@@ -18,6 +19,8 @@ import { OP, TAG, ippRequest, encodeRequest, type IppCollection, type IppRespons
 
 const TIMEOUT_MS = 300_000;
 const MAX_COPIES = 20;
+const HISTORY_DEFAULT = 10;
+const HISTORY_MAX = 50;
 const MAX_SOURCE_BYTES = 100 * 1024 * 1024;
 const PDF = /\.pdf$/i;
 const PICTURE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
@@ -159,6 +162,16 @@ const TOOLS = [
       required: ["path"],
     },
   },
+  {
+    name: "print_history",
+    description:
+      "The home printer's recent jobs, newest first: when, the file, pages and copies, paper and settings, whether it was sent, refused or of unknown outcome, and the ink level of each color when the job started; with the ink levels now. " +
+      "Use it to answer what was printed and how much ink printing has used. Jobs of other accounts appear without their file names.",
+    inputSchema: {
+      type: "object",
+      properties: { limit: { type: "integer", minimum: 1, maximum: HISTORY_MAX, description: `How many jobs to list, default ${HISTORY_DEFAULT}` } },
+    },
+  },
 ];
 
 /** Thread-level MCP wiring for a Codex executor. */
@@ -175,7 +188,7 @@ export const PRINTER_POLICY =
   "The home printer is connected (aio_printer): when the user wants a file, photo, web page, or a document you made printed, print it directly with print_file; do not make the user print it themselves. " +
   "It only accepts PDFs and images in the workspace: convert Word, Excel, PPT, text, and so on to PDF in the sandbox first (e.g. soffice --headless --convert-to pdf), save web pages as PDF first, then print the converted file. " +
   "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, color or black and white, and paper, and if they did not say, use 1 copy, one-sided, color, on plain paper. The printer can hold several papers at once (e.g. Letter plain paper and 4x6 photo paper): printer_status lists them; pass paper to print_file when the user names a size or wants a photo print on photo paper, and when it is unclear which paper they mean, ask. Photo paper prints at high quality on its own; pass quality only when the user asks for finer or faster printing than that default. Pass borderless only when the user asks for a borderless (edge-to-edge, no white border) print. Confirm with the user first for more than 20 pages or multiple copies. " +
-  "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer.";
+  "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer. print_history lists what was printed and the ink levels at each job.";
 
 /** Turning one account's workspace file into printer pages. */
 export interface PrintFiles {
@@ -243,6 +256,7 @@ export class PrinterGateway {
   #workspace: string;
   #usernameOf: (userId: string) => string | null;
   #filesFor: (userId: string) => Promise<PrintFiles>;
+  #db: Db | undefined;
   /** capability token -> account */
   #tokens = new Map<string, { userId: string; username: string }>();
   /** One job at a time: the printer takes a single document per job. */
@@ -257,6 +271,8 @@ export class PrinterGateway {
     workspace: string;
     usernameOf: (userId: string) => string | null;
     filesFor: (userId: string) => Promise<PrintFiles>;
+    /** Where the jobs are remembered; without it there is no history. */
+    db?: Db;
   }) {
     this.#port = opts.port;
     this.#log = opts.log.child("printer");
@@ -265,6 +281,7 @@ export class PrinterGateway {
     this.#workspace = opts.workspace.replace(/\/$/, "");
     this.#usernameOf = opts.usernameOf;
     this.#filesFor = opts.filesFor;
+    this.#db = opts.db;
   }
 
   /** Give a granted runtime its printer URL. */
@@ -337,6 +354,7 @@ export class PrinterGateway {
         const args = (params?.arguments ?? {}) as Record<string, unknown>;
         if (name === "printer_status") return reply(await this.#tool(() => this.#status()));
         if (name === "print_file") return reply(await this.#tool(() => this.#print(account, args)));
+        if (name === "print_history") return reply(await this.#tool(() => this.#history(account, args)));
         return { jsonrpc: "2.0", id, error: { code: -32602, message: `unknown tool ${name}` } };
       }
       default:
@@ -375,9 +393,7 @@ export class PrinterGateway {
     const res = await this.#printer();
     const a = res.attrs;
     const reasons = problems(a);
-    const names = (a["marker-names"] ?? []).map(String);
-    const levels = a["marker-levels"] ?? [];
-    const ink = names.map((n, i) => `${n.replace(/ ink$/i, "")} ${Number(levels[i]) >= 0 ? `${levels[i]}%` : "unknown"}`).join(", ");
+    const ink = inkOf(a);
     const paper = loadedPapers(res).map(describe).join(", ");
     return [
       `Printer: ${a["printer-make-and-model"]?.[0] ?? "unknown model"}`,
@@ -386,6 +402,37 @@ export class PrinterGateway {
       ink ? `Ink: ${ink}` : "",
       paper ? `Paper: ${paper}` : "",
     ].filter(Boolean).join("\n");
+  }
+
+  #remember(account: { userId: string }, job: { file: string; pages: number; copies: number; settings: string; outcome: "sent" | "refused" | "unknown"; jobId?: unknown; ink: string }): void {
+    try {
+      this.#db
+        ?.prepare("INSERT INTO print_jobs (created_at, owner_id, file, pages, copies, settings, outcome, job_id, ink) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(Date.now(), account.userId, job.file, job.pages, job.copies, job.settings, job.outcome, Number.isInteger(job.jobId) ? (job.jobId as number) : null, job.ink);
+    } catch (err) {
+      this.#log.warn("print job not recorded", { error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  async #history(account: { userId: string }, args: Record<string, unknown>): Promise<string> {
+    const limit = args.limit === undefined ? HISTORY_DEFAULT : Number(args.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > HISTORY_MAX) throw new PrintError(`limit must be an integer from 1 to ${HISTORY_MAX}`);
+    if (!this.#db) throw new PrintError("Print history is not kept on this installation");
+    const rows = this.#db.prepare("SELECT * FROM print_jobs ORDER BY id DESC LIMIT ?").all(limit) as Array<{ created_at: number; owner_id: string; file: string; pages: number; copies: number; settings: string; outcome: string; job_id: number | null; ink: string }>;
+    const total = (this.#db.prepare("SELECT COUNT(*) AS n FROM print_jobs").get() as { n: number }).n;
+    const now = await this.#printer().then((res) => inkOf(res.attrs) || "not reported", (err) => `unknown (${err instanceof Error ? err.message : String(err)})`);
+    const outcomes: Record<string, string> = { sent: "sent", refused: "refused by the printer, not printed", unknown: "outcome unknown" };
+    return [
+      `Ink now: ${now}`,
+      rows.length ? `Jobs, newest first (${rows.length} of ${total}):` : "No print jobs recorded yet.",
+      ...rows.map((r) =>
+        [
+          `${new Date(r.created_at).toLocaleString("sv-SE")}: ${r.owner_id === account.userId ? r.file : "(another account's job)"}, ${r.pages} pages × ${r.copies} copies, ${r.settings}`,
+          `${outcomes[r.outcome] ?? r.outcome}${r.job_id === null ? "" : `, job ${r.job_id}`}`,
+          r.ink ? `ink then: ${r.ink}` : "",
+        ].filter(Boolean).join("; "),
+      ),
+    ].join("\n");
   }
 
   async #print(account: { userId: string; username: string }, args: Record<string, unknown>): Promise<string> {
@@ -420,6 +467,9 @@ export class PrinterGateway {
         : [[TAG.keyword, "media", media]];
       const files = await this.#filesFor(account.userId);
       const raster = await files.rasterize(file, { color, sides, media, width, height, pages, borderless, dpi });
+      const settings = `${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, on ${paper.label}${borderless ? ", borderless" : ""}, ${quality} quality`;
+      const remember = (outcome: "sent" | "refused" | "unknown", jobId?: unknown) =>
+        this.#remember(account, { file: path.posix.basename(file), pages: raster.pages, copies, settings, outcome, jobId, ink: inkOf(a) });
       const started = Date.now();
       let res: IppResponse;
       try {
@@ -432,16 +482,19 @@ export class PrinterGateway {
         );
       } catch (err) {
         // The document may or may not have reached the printer: never resend on our own.
+        remember("unknown");
         this.#log.warn("print job outcome unknown", { user: account.username, error: err instanceof Error ? err.message : String(err) });
         throw new PrintError(`An error occurred while sending (${err instanceof Error ? err.message : String(err)}); not sure whether the printer received it. Do not resend automatically; first ask the user to check whether the printer printed anything.`);
       }
+      if (res.status >= 0x0100) remember("refused");
       if (res.status >= 0x0100) throw new PrintError(`The printer refused this job (IPP status 0x${res.status.toString(16)}${res.attrs["status-message"] ? `: ${res.attrs["status-message"][0]}` : ""}); nothing was printed`);
       const jobId = res.attrs["job-id"]?.[0];
+      remember("sent", jobId);
       const state = JOB_STATES[Number(res.attrs["job-state"]?.[0])] ?? "received";
       this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, paper: describe(paper), borderless, quality, dpi, bytes: raster.bytes.length, ms: Date.now() - started });
       const warn = problems(a);
       return [
-        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, on ${paper.label}${borderless ? ", borderless" : ""}, ${quality} quality.`,
+        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${settings}.`,
         `Job ${jobId ?? "unknown"}, status: ${state}.`,
         warn.length ? `Printer notes: ${warn.join(", ")}` : "",
       ].filter(Boolean).join("\n");
@@ -449,6 +502,12 @@ export class PrinterGateway {
     this.#queue = job.catch(() => undefined);
     return await job;
   }
+}
+
+/** Each ink's level, in words. */
+function inkOf(a: IppResponse["attrs"]): string {
+  const levels = a["marker-levels"] ?? [];
+  return (a["marker-names"] ?? []).map((n, i) => `${String(n).replace(/ ink$/i, "")} ${Number(levels[i]) >= 0 ? `${levels[i]}%` : "unknown"}`).join(", ");
 }
 
 /** The printer's state reasons that matter to a person, in words. */

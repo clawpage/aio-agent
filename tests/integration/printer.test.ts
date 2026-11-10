@@ -56,7 +56,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
       return { bytes: RASTER, pages: opts.pages.length || 3 };
     },
   });
-  const printerGateway = new PrinterGateway({ port: 0, log: h.ctx.log, printerUri, accounts: ["owner"], workspace: "/home/gem/workspace", usernameOf: (id) => USERS[id] ?? null, filesFor });
+  const printerGateway = new PrinterGateway({ port: 0, log: h.ctx.log, printerUri, accounts: ["owner"], workspace: "/home/gem/workspace", usernameOf: (id) => USERS[id] ?? null, filesFor, db: h.ctx.db });
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, printerGateway);
   await gateway.start();
@@ -84,7 +84,8 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     const init = await rpc(owner.printer!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_printer" }, instructions: PRINTER_POLICY });
     const tools = (await (await rpc(owner.printer!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["printer_status", "print_file"]);
+    expect(tools.map((t) => t.name)).toEqual(["printer_status", "print_file", "print_history"]);
+    expect((await call("print_history")).content[0]!.text).toBe("Ink now: Black 99%, Cyan 40%\nNo print jobs recorded yet.");
 
     const status = await call("printer_status");
     expect(status.isError).toBeUndefined();
@@ -205,6 +206,18 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     expect(unknown.isError).toBe(true);
     expect(unknown.content[0]!.text).toContain("not sure whether the printer received it");
     expect(seen.filter((s) => s.op === 0x0002)).toHaveLength(1);
+
+    // The history: every job that reached the printer, newest first, with the ink it started from; refusals before sending are not jobs.
+    h.ctx.db.prepare("INSERT INTO print_jobs (created_at, owner_id, file, pages, copies, settings, outcome, job_id, ink) VALUES (?,?,?,?,?,?,?,?,?)").run(Date.now(), "user_cr", "secret.pdf", 1, 1, "one-sided, color, on Letter, normal quality", "sent", 18, "Black 90%");
+    const history = (await call("print_history")).content[0]!.text.split("\n");
+    expect(history[0]).toBe("Ink now: Black 99%, Cyan 40%");
+    expect(history[1]).toBe("Jobs, newest first (7 of 7):");
+    expect(history[2]).toMatch(/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d: \(another account's job\), 1 pages × 1 copies, .*; sent, job 18; ink then: Black 90%$/);
+    expect(history[3]).toContain("报告.pdf, 3 pages × 1 copies, one-sided, color, on 4x6, normal quality; outcome unknown; ink then: Black 99%, Cyan 40%");
+    expect(history.at(-1)).toContain("报告.pdf, 3 pages × 2 copies, two-sided, black and white, on Letter, normal quality; sent, job 17; ink then: Black 99%, Cyan 40%");
+    expect(history.join("\n")).not.toContain("secret.pdf");
+    expect((await call("print_history", { limit: 2 })).content[0]!.text.split("\n")).toHaveLength(4);
+    expect((await call("print_history", { limit: 0 })).isError).toBe(true);
   } finally {
     gateway.close();
     upstream.closeAllConnections();

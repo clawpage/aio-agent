@@ -555,7 +555,7 @@ async function main(): Promise<void> {
   const ha=new HaGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),cameras:ctx.cameras,history:HaHistory.from(ctx.cfg,ctx.log,haDashboard),dashboard:haDashboard,
     clipFiles:async name=>{const id=account("SELECT id AS v FROM owners WHERE username=?",name);if(!id)throw new Error(`no account ${name}`);return sandboxClipFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id));}});
   ha.provision(ctx.cfg);
-  const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
+  const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,db:ctx.db,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
     filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
   printer.provision(ctx.cfg);
