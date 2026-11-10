@@ -229,3 +229,11 @@ Google 提示审核通常在 7 天内完成，也可能更久；这不是获批�
 - 送审时控制台的「Android 手机」设置页尚未部署，`PA_EXEC_ENVS` 也仍关闭：新包装上后暂时看不到开关，打开后 AI 也还用不到这台手机。
 - 同日稍后按用户「部署」上线界面：UI 镜像 `aio-agent-ui:0.1.2-android-465c115`（`refresh ui`，控制面未重启，仍为 `0.1.2-envs-d96b078`），公网包里已有「Android 手机」设置页；
   上线前 `npm run typecheck && npm test` 1417 通过，公网 smoke 换容器后第一遍两项 WebSocket 502、重跑 39/39。`PA_EXEC_ENVS` 仍关闭，开关打开后 AI 还用不到手机。
+
+## 2026-11-09 0.1.6：包已备好，未上传
+
+- 原生改动（相对 1005）：日历、选取的照片、20 MB 拉取与「文件」里的文件夹（`3df30a9`），AI 浏览器小窗在右上角、可全屏，点「完成，交还给 AI」后自动缩回小窗（`7747315`）。
+- 包：`0.1.6`，versionCode `1006`，arm64，target SDK 37，同一上传密钥签名（证书 SHA-256 `cb1bdb71…f272`），`apksigner`/`jarsigner` 与 16 KB ZIP 对齐通过；
+  AAB/APK 与 `SHA256SUMS` 在被忽略的 `var/android-releases/0.1.6-ai.clawpage.agent-20261109/`。
+- 验收：调试包在模拟器上 `tests/devices/android.e2e.test.ts` 10/10（其中没有点「完成」这一步），`./check-android-builds.sh` 两种包都通过；发布签名包没有装机试过，也没有上真机。
+- Play：未上传、未送审。`1005 (0.1.5)` 当日已送审，是否用 1006 顶替由用户决定。
