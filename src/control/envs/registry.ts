@@ -22,6 +22,17 @@ const READ_TIMEOUT_MS = 15_000;
 const CALL_TIMEOUT_MS = 120_000;
 /** A photo may first have to come down from the cloud. */
 const SLOW_TIMEOUT_MS = 150_000;
+/** How long a device's own browser waits for the person in browser_request_human (the apps' own limit). */
+export const HUMAN_WAIT_MS = 600_000;
+
+/** How long a call to a device may take: the person's own time, a command's own timeout, a transfer; else two minutes. */
+export function callTimeoutMs(tool: string, args: Record<string, unknown>): number {
+  if (tool === "browser_request_human") return HUMAN_WAIT_MS + SLACK_MS;
+  if (tool === "shell_bash") { const seconds = Number(args.timeout_sec); return Math.min(seconds > 0 ? seconds : CALL_TIMEOUT_MS / 1000, MAX_COMMAND_S) * 1000 + SLACK_MS; }
+  return tool === "photos_get" || tool === "files_pull" || tool === "files_push" ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS;
+}
+/** The longest any call may take, for the executor's own patience with aio_env. */
+export const MAX_CALL_TIMEOUT_MS = Math.max(HUMAN_WAIT_MS, MAX_COMMAND_S * 1000) + SLACK_MS;
 
 type Protocol = "v1" | "ios-v0" | "mac-v0";
 
@@ -119,7 +130,7 @@ export class EnvRegistry {
   }
 
   async #send(route: Route, caller: MacCaller, tool: string, args: Record<string, unknown>): Promise<EnvAnswer> {
-    const timeoutMs = tool === "photos_get" || tool === "files_pull" || tool === "files_push" ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS;
+    const timeoutMs = callTimeoutMs(tool, args);
     if (route.protocol === "mac-v0") {
       if (route.kind === "android") return this.#mac.phone(caller, tool, args, route.deviceId);
       return TOOL_CAPABILITY.get(tool) === "shell" ? this.#mac.shell(caller, tool, args) : this.#mac.browser(caller, tool, args);
@@ -128,9 +139,7 @@ export class EnvRegistry {
     if (route.protocol === "v1" && route.kind === "mac" && TOOL_CAPABILITY.get(tool) === "browser" && this.#browser) {
       return this.#browser.envCall(route.tunnel.ownerId, caller.headers, tool, args, () => this.#post(route, caller, tool, args, timeoutMs));
     }
-    // A command may run up to its own timeout on the Mac, and longer than any other call.
-    const seconds = Number(args.timeout_sec);
-    return this.#post(route, caller, tool, args, tool === "shell_bash" ? Math.min(seconds > 0 ? seconds : CALL_TIMEOUT_MS / 1000, MAX_COMMAND_S) * 1000 + SLACK_MS : timeoutMs);
+    return this.#post(route, caller, tool, args, timeoutMs);
   }
 
   async #post(route: Route, caller: MacCaller, tool: string, args: Record<string, unknown>, timeoutMs: number): Promise<EnvAnswer> {

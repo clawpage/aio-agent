@@ -52,6 +52,11 @@ sending a message or mail, and deleting are never done on the agent's word alone
 action and waits for the person to tap. The call answers `needs_confirmation` until they do (or
 `declined`), and the agent says so instead of retrying.
 
+**Patience.** A call to a device is given two minutes; a transfer (`photos_get`, `files_*`) a little more,
+`shell_bash` its own timeout, and `browser_request_human` the ten minutes the apps wait for the person
+(`callTimeoutMs` in `envs/registry.ts`). The executor waits for `aio_env` longer than any of them, as long
+as for a page the person holds in the console.
+
 ## Device protocol (over the existing device link)
 
 The device link (`deviceLink.ts`) is unchanged: the device dials `/api/device-link/connect` with its

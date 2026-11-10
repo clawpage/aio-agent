@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { login } from "../helpers/harness.js";
 import { startEnvWorld, waitFor } from "../helpers/envs.js";
-import type { EnvRegistry } from "../../src/control/envs/registry.js";
+import { callTimeoutMs, HUMAN_WAIT_MS, type EnvRegistry } from "../../src/control/envs/registry.js";
 import { ENV_TOOLS, envMcpServers, envThreadServers } from "../../src/control/envs/gateway.js";
 import { ENV_POLICY, envBrief } from "../../src/control/envs/policy.js";
 import { codexRequirementsToml } from "../../src/control/sandbox/seed.js";
@@ -302,6 +302,20 @@ describe("Android, however it is connected", () => {
     await waitFor(async () => (await registry.list(alice.id)).find((e) => e.kind === "android" && e.online) && (await registry.list(alice.id)).length);
     await agent.call("screen_tap", { env: phones[0]!.id, x: 7, y: 8 });
     expect(mac.seen.filter((s) => s.path === "/mcp" && s.body.method === "tools/call").at(-1)?.body.params).toEqual({ name: "mobile_click_on_screen_at_coordinates", arguments: { device: "R5CT40ABCDE", x: 7, y: 8 } });
+  });
+});
+
+describe("patience", () => {
+  it("waits for the person as long as the device does, and the executor waits longer than any call", () => {
+    // The apps wait ten minutes in browser_request_human; hanging up before them would lose the person's work.
+    expect(callTimeoutMs("browser_request_human", {})).toBeGreaterThan(HUMAN_WAIT_MS);
+    expect(callTimeoutMs("shell_bash", { timeout_sec: 240 })).toBeGreaterThan(240_000);
+    expect(callTimeoutMs("shell_bash", { timeout_sec: 99_999 })).toBe(callTimeoutMs("shell_bash", { timeout_sec: 240 }));
+    expect(callTimeoutMs("browser_read", {})).toBe(120_000);
+    const wired = envThreadServers({ env: { url: "http://gateway/env" } } as never) as { aio_env: { tool_timeout_sec: number } };
+    for (const [tool, args] of [["browser_request_human", {}], ["shell_bash", { timeout_sec: 240 }], ["photos_get", {}]] as const) {
+      expect(wired.aio_env.tool_timeout_sec * 1000).toBeGreaterThan(callTimeoutMs(tool, args));
+    }
   });
 });
 

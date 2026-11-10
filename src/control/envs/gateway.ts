@@ -5,10 +5,10 @@ import type { Logger } from "../../common/logger.js";
 import { McpGateway, type McpCall } from "../mcpGateway.js";
 import type { DeviceLinks } from "../deviceLink.js";
 import { requireWorkspaceFilePath } from "../documents/paths.js";
-import { TAB_TASK_HEADER, type BrowserTask } from "../browser/tabs.js";
+import { TAB_TASK_HEADER, TAB_TOOL_TIMEOUT_SEC, type BrowserTask } from "../browser/tabs.js";
 import { ENV_TOOLS, LISTED_TOOLS, TOOL_CAPABILITY, type Capability, type EnvAnswer } from "./catalog.js";
 import { ENV_POLICY } from "./policy.js";
-import type { EnvCall, EnvRegistry } from "./registry.js";
+import { MAX_CALL_TIMEOUT_MS, type EnvCall, type EnvRegistry } from "./registry.js";
 import type { AppContext } from "../context.js";
 import { sandboxImageFiles } from "../imageTool.js";
 
@@ -23,7 +23,8 @@ export { ENV_TOOLS } from "./catalog.js";
  * between a device's app folder and the workspace only. Logs name the account, environment and tool,
  * never content.
  */
-const TIMEOUT_SEC = 180;
+/** The executor waits as long as the longest call (the person acting in a browser, a Mac's page in the console), and a little more. */
+const TIMEOUT_SEC = Math.max(TAB_TOOL_TIMEOUT_SEC, MAX_CALL_TIMEOUT_MS / 1000 + 10);
 const MAX_PHOTOS = 5;
 const MAX_PICTURE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
