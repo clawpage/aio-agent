@@ -7,6 +7,7 @@ import { InviteSettings } from './InviteSettings';
 import { LanguageSettings } from './LanguageSettings';
 import { PushSettings } from './PushSettings';
 import { IphoneSettings, useIphoneEntry } from './IphoneSettings';
+import { AndroidSettings, useAndroidEntry } from './AndroidSettings';
 import { SettingsPages, type SettingsSection } from './SettingsLayout';
 import { ProfileSettings } from './ProfileSettings';
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -47,6 +48,7 @@ interface Props {
  */
 export function Settings({ section, onOpen, onBack, onSaved, onProfile, onLogout }: Props) {
   const iphone = useIphoneEntry();
+  const android = useAndroidEntry();
   const sections: SettingsSection[] = [
     { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
     { id: "soul", title: t.settings.soul.title, note: "SOUL.md", page: () => <SoulSettings/> },
@@ -55,6 +57,7 @@ export function Settings({ section, onOpen, onBack, onSaved, onProfile, onLogout
     { id: "support", title: t.support.queue, page: () => <SupportSettings/> },
     { id: "recall", title: t.settings.recall.title, page: () => <RecallSettings/> },
     ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
+    ...(android ? [{ id: "android", title: t.app.android.label, page: () => <AndroidSettings/> }] : []),
     { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
   ];
   return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} onLogout={onLogout}

@@ -140,6 +140,13 @@ Chrome/…`, client hints brand "Android WebView"), not changed; the app asks We
 `X-Requested-With` header, which WebView 124 (the emulator's) still sent on a main-frame navigation.
 Confirmation, `browser_request_human` and the refusal to type passwords are as on the iPhone.
 
+The console turns it on from Settings → "Android phone" (`AndroidSettings.tsx`): one switch, since the app
+has no abilities to turn on one by one. On creates a device link of kind `android` for the signed-in account
+and hands it to the app; off deletes the link and tells the app to forget it. `deviceTools.ts` speaks to both
+apps: iOS through `webkit.messageHandlers.aioDeviceTools` (the reply is the promise), Android through the
+`aioDeviceTools` web message listener (each message carries a `seq` its answer repeats; `{error}` is a
+refusal).
+
 ## Distribution
 
 - **App Store iOS app** and **Google Play Android app**: `browser`, `files`, `photos`, `calendar` (and
@@ -154,7 +161,7 @@ Confirmation, `browser_request_human` and the refusal to type passwords are as o
 
 1. Control plane: environment registry, `aio_env`, adapters for old devices, the brief. (iOS first.)
 2. iPhone app: `/env/manifest`, `/env/call`, the in-app browser and files, foreground events.
-3. Android app (Play build): device link, browser, files (done), photos, calendar.
+3. Android app (Play build): device link, browser, files, the console's switch (done), photos, calendar.
 4. Android APK: pairing, shell helper, virtual display, `apps` / `screen`.
 
 ## Retiring the old servers
@@ -171,4 +178,8 @@ speaking protocol 1 are live and the device-link log shows no old-protocol devic
   in and out, Chrome appearing, the terminal off and on, and the old endpoints still answering.
 - `tests/devices/ios.e2e.test.ts`: the real iPhone app in the simulator against a local control plane.
 - `tests/devices/android.e2e.test.ts`: the real Android app (the Play build) in the emulator against a local
-  control plane: the same behaviours as the iPhone's, typing in Chinese included.
+  control plane: the same behaviours as the iPhone's, typing in Chinese included, and the console's own
+  `deviceTools.ts` (put into the app's console page through DevTools, since that page is the deployed one)
+  linking and unlinking it as the settings page does.
+- `tests/e2e/android-phone.spec.ts` and `iphone-abilities.spec.ts`: the two settings pages against a stand-in
+  bridge (`playwright.local.config.ts`).

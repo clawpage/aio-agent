@@ -234,7 +234,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
         }
     }, [expired]);
     useEffect(() => { void check(); }, [check]);
-    // The iPhone app gives its abilities only to the account signed in here (deviceTools.ts).
+    // The iPhone and Android apps give their abilities only to the account signed in here (deviceTools.ts).
     useEffect(() => { if (auth !== null) syncDeviceToolsAccount(auth ? username : null); }, [auth, username]);
     useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
     useEffect(() => {

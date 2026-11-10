@@ -8,7 +8,7 @@ const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
 /** Whether the configuration page offers the iPhone entry: inside the iPhone app, or once the account linked one. */
 export function useIphoneEntry(): boolean {
-  const inApp = hasDeviceTools();
+  const inApp = hasDeviceTools("ios");
   const [linked, setLinked] = useState(false);
   useEffect(() => {
     if (inApp) return;
@@ -27,7 +27,7 @@ type Remote = Awaited<ReturnType<typeof api.iosDevice>>;
  * this account linked, which it can remove. Hidden in a browser for an account that never linked one.
  */
 export function IphoneSettings() {
-  const inApp = hasDeviceTools();
+  const inApp = hasDeviceTools("ios");
   const [native, setNative] = useState<NativeTools | null>(null);
   const [links, setLinks] = useState<DeviceLink[] | null>(null);
   const [remote, setRemote] = useState<Remote | null>(null);

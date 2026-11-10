@@ -178,12 +178,13 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   WebSocket, the one Gradle dependency it adds) while the app is in the foreground; `AIBrowser.kt` is the agent's browser
   panel over the console and `DeviceFiles.kt` its folder (`Android/data/ai.clawpage.agent/files/AI Files`); see "Android
   App 的浏览器与文件夹" in `docs/FEATURES.md`. The console's main frame talks to it through the `aioDeviceTools` web
-  message listener (`status`, `account`, `link`, `unlink`; JSON strings with a `seq` the answer repeats); the console
-  has no Android entry that sends `link` yet. The token is in `noBackupFilesDir/device-link.json`. Native strings
+  message listener (`status`, `account`, `link`, `unlink`; JSON strings with a `seq` the answer repeats), from
+  Settings → "Android phone" (`AndroidSettings.tsx`, one switch). The token is in `noBackupFilesDir/device-link.json`. Native strings
   (panel, confirmation) are in `values*/strings.xml` in five languages (`values-b+zh+Hant` is Traditional Chinese).
   Debug builds only (`BuildConfig.DEBUG`): `adb -s <emulator> shell am start -n ai.clawpage.agent/.MainActivity --es
   AIODeviceToolsLinkURL ws://10.0.2.2:<port>/api/device-link/connect --es AIODeviceToolsLinkToken dl_… [--es
-  AIOConfirmSeconds 4]` links the app to a local control plane without the console. The emulator test is
+  AIOConfirmSeconds 4]` links the app to a local control plane without the console; R8 removes this in a release
+  build (its extras' names are not in the release `classes.dex`). The emulator test is
   `AIO_ANDROID_E2E=1 npx vitest run tests/devices/android.e2e.test.ts` (from the repository root, after the debug build);
   it dials 10.0.2.2, not `adb reverse`, which dropped the emulator when a screenshot's answer went through it. The
   debug APK (about 120 MB) needs about 1 GB free on the emulator's `/data`; a full AVD can be started with a data

@@ -1067,7 +1067,8 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
 - **连接**：与 iPhone 相同的规则。App 自己（OkHttp WebSocket）连 `wss://<主站>/api/device-link/connect`（连接种类 `android`），回答 `GET /env/manifest`（`deviceId` 是 `ANDROID_ID` 的哈希，名称取系统设备名）和 `POST /env/call`，回到前台时推送 `manifest` 事件；退到后台时（等手头的调用答完，最多 5 秒）断开，回到前台立即重连。
   令牌和它属于的账号存在 App 的 no-backup 目录（`device-link.json`，备份不带走）；连接被移除（4001）或令牌失效（401）时 App 忘掉令牌。
   控制台经 `aioDeviceTools`（只对主站主框架注入，JSON 字符串，带 `seq`，回答带同一个 `seq`）交令牌（`link`）、说明当前账号（`account`：同一账号才连接，退出登录断开，换别的账号登录即忘掉令牌）、`unlink`、`status`。
-  **控制台还没有在 Android App 里连接的入口**（「iPhone 能力」只认 iOS 的桥接）：App 端已就绪，界面另做。
+- **配置页「Android 手机」**（`AndroidSettings.tsx`，五种语言）：在 Android App 里只有一个开关「让 AI 使用这台手机的浏览器和 App 的文件夹」——打开时为当前账号新建一个种类 `android` 的连接（名称取手机名）交给 App，关闭时删掉这个连接并让 App 忘掉它；下面一行是连接状态和「一站 App 开在屏幕上时才能用」，再下面是这个账号的其他 Android 手机（可移除）。没有逐项能力。浏览器里只在账号连过 Android 手机时出现，只列出和移除。
+  `deviceTools.ts` 同时认两种桥接（iOS 的 `webkit.messageHandlers.aioDeviceTools`、Android 的 `aioDeviceTools` 加 `seq`），「iPhone 能力」只在 iOS App 里显示开关，Android App 里不出现（账号连过 iPhone 时按浏览器的样子列出）；`syncDeviceToolsAccount` 两种 App 都发。不调用 `/api/ios-device`。
 - **浏览器**：控制台之上的一个小窗（实时缩小的页面），点开全屏，有「最小化」「关闭」，返回键先后退、再缩小；它有自己的 WebView profile，登录状态与控制台分开。
   Android 的 WebView 没有隔离的脚本世界，所以读页和操作的脚本运行在页面自己的世界里，但不留下任何东西（不加属性、节点、全局变量，不改原型）；元素的 ref 是它在页面控件里的序号，每次按同一方式重新找到，并核对上次读页时的指纹，页面变了就让 AI 重新读。
   点击是对元素中心的真实触摸（页面停稳后测量），输入是键盘的文字（经 WebView 自己的输入连接，支持中文）、回车是真实按键，滚动是手指滑动，页面看到的事件都是 `isTrusted`。只有真实输入做不到时才用脚本：元素被遮住或无法滚到屏幕上的点击、下拉框的取值、键盘连接没送到的文字（都记日志）。

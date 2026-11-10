@@ -100,6 +100,7 @@ export default defineConfig({
     "**/offline.spec.ts",
     "**/widgets.spec.ts",
     "**/iphone-abilities.spec.ts",
+    "**/android-phone.spec.ts",
     "**/edge-swipe.spec.ts",
     "**/profile.spec.ts",
   ],

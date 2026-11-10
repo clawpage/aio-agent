@@ -4,6 +4,8 @@ import fs from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
+import { transformWithOxc } from "vite";
+import WebSocket from "ws";
 import { startEnvWorld, waitFor } from "../helpers/envs.js";
 
 /**
@@ -30,6 +32,7 @@ const adb = (...args: string[]) => execFileSync(`${process.env.ANDROID_HOME ?? `
 
 describe.skipIf(!RUN)("the Android app as an execution environment, on the emulator", () => {
   let world: Awaited<ReturnType<typeof startEnvWorld>>;
+  let alice: Awaited<ReturnType<typeof world.signIn>>;
   let agent: ReturnType<typeof world.executor>;
   let env: string;
   /** What a call answered, or the device's words when it refused. */
@@ -44,7 +47,7 @@ describe.skipIf(!RUN)("the Android app as an execution environment, on the emula
     if (!fs.existsSync(APK)) throw new Error(`no debug build at ${APK}`);
     fs.mkdirSync(OUT, { recursive: true });
     world = await startEnvWorld();
-    const alice = await world.signIn("alice");
+    alice = await world.signIn("alice");
     const token = await world.link(alice, "android", "Pixel");
     agent = world.executor(world.runtimeFor(alice.id, 18301));
     adb("install", "-r", APK);
@@ -147,4 +150,57 @@ describe.skipIf(!RUN)("the Android app as an execution environment, on the emula
     launch();
     await waitFor(async () => (await agent.list()).envs.find((e) => e.id === env && e.online && e.foreground), 30_000);
   }, 90_000);
+
+  it("is linked and unlinked by the console's own bridge code, as its settings page does it", async () => {
+    // The console in the app is the deployed one, so this build's deviceTools.ts goes into that page through
+    // DevTools (a debug build's web view allows it) and talks to the app's real `aioDeviceTools` listener.
+    const pid = adb("shell", "pidof", PACKAGE).trim();
+    const forward = adb("forward", "tcp:0", `localabstract:webview_devtools_remote_${pid}`).trim();
+    try {
+      const page = await waitFor(async () => ((await (await fetch(`http://127.0.0.1:${forward}/json`)).json()) as Array<{ type: string; url: string; webSocketDebuggerUrl: string }>)
+        .find((p) => p.type === "page" && p.url.startsWith("https://agent.clawpage.ai/")), 60_000);
+      const cdp = new WebSocket(page.webSocketDebuggerUrl);
+      await new Promise((done) => cdp.once("open", done));
+      let id = 0;
+      const run = (expression: string) => new Promise<any>((resolve, reject) => {
+        const mine = ++id;
+        cdp.on("message", function answer(raw) {
+          const m = JSON.parse(String(raw)) as { id: number; result?: { result?: { value?: unknown }; exceptionDetails?: unknown } };
+          if (m.id !== mine) return;
+          cdp.off("message", answer);
+          if (m.result?.exceptionDetails) reject(new Error(JSON.stringify(m.result.exceptionDetails))); else resolve(m.result?.result?.value);
+        });
+        cdp.send(JSON.stringify({ id: mine, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
+      });
+      const source = (await transformWithOxc(fs.readFileSync(path.resolve("src/ui/src/deviceTools.ts"), "utf8"), "deviceTools.ts")).code.replace(/^export /gm, "");
+      await run(`window.__dt = (() => { ${source}; return { deviceToolsApp, askDeviceTools, listenDeviceTools, syncDeviceToolsAccount }; })();
+        window.__states = []; __dt.listenDeviceTools((s) => __states.push(s.state)); true`);
+      const ask = async (message: object) => JSON.parse(await run(`__dt.askDeviceTools(${JSON.stringify(message)}).then(JSON.stringify, (e) => JSON.stringify({ refused: e.message }))`)) as Record<string, unknown>;
+      expect(await run("__dt.deviceToolsApp()")).toBe("android");
+
+      // On: a link of kind android named after the phone, handed to the app; the agent sees the phone.
+      const state = await ask({ type: "status" });
+      expect(state).toMatchObject({ linked: true, abilities: {} });
+      expect(state.seq).toBeUndefined();
+      const res = await world.h.request("/api/device-links", { method: "POST", headers: alice.headers, body: JSON.stringify({ name: state.name, kind: "android" }) });
+      const created = (await res.json()) as { link: { id: string }; token: string };
+      expect(await ask({ type: "link", token: created.token, linkId: created.link.id, account: "alice" })).toMatchObject({ linked: true, linkId: created.link.id });
+      await waitFor(() => world.links.list(alice.id, "android").find((l) => l.id === created.link.id && l.online), 30_000);
+      await waitFor(async () => (await agent.list()).envs.find((e) => e.kind === "android" && e.online && e.name === state.name), 30_000);
+      await waitFor(async () => ((await run("__states")) as string[]).includes("online"), 10_000);
+      // Who is signed in, as the console says it on every start: the same account keeps the link.
+      await run(`__dt.syncDeviceToolsAccount("alice")`);
+      expect(await ask({ type: "status" })).toMatchObject({ linked: true, state: "online" });
+      // What Android does not do comes back as a refusal.
+      expect(await ask({ type: "enable", ability: "photos" })).toEqual({ refused: "unknown" });
+
+      // Off: the link goes on the server and the app forgets it.
+      await world.h.request(`/api/device-links/${created.link.id}`, { method: "DELETE", headers: alice.headers });
+      expect(await ask({ type: "unlink" })).toMatchObject({ linked: false, linkId: null, state: "off" });
+      await waitFor(async () => !(await agent.list()).envs.some((e) => e.kind === "android" && e.online), 30_000);
+      cdp.close();
+    } finally {
+      adb("forward", "--remove", `tcp:${forward}`);
+    }
+  }, 120_000);
 });
