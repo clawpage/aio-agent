@@ -34,34 +34,71 @@ async function openSettings(page: Page, mobile: boolean, entry = true) {
   if (entry) await openSettingsEntry(page, "Android 手机");
 }
 
-test("inside the Android app, one switch links this phone for the account signed in here and unlinks it again", async ({ page }, info) => {
-  // The app's web message listener (DeviceTools.kt): records what the console sends and answers out of band
-  // with its state, repeating the message's `seq`; anything it does not know is refused.
-  await page.addInitScript(() => {
+/**
+ * The app's web message listener (DeviceTools.kt): records what the console sends and answers out of band with
+ * its state, repeating the message's `seq`; anything it does not know is refused. Android allows the calendar
+ * when asked unless `denyCalendar`; the photo picker returns two photos.
+ */
+async function appBridge(page: Page, opts: { denyCalendar?: boolean } = {}) {
+  await page.addInitScript((denyCalendar) => {
     const sent: Array<Record<string, unknown>> = [];
     (window as unknown as { __sent: typeof sent }).__sent = sent;
     const listeners: Array<(event: { data: string }) => void> = [];
-    const state = { linked: false, linkId: null as string | null, state: "off", name: "Pixel 8", abilities: {} };
+    const thumb = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==";
+    let photos: Array<{ id: string; video: boolean; thumb: string }> = [];
+    const state = {
+      linked: false, linkId: null as string | null, state: "off", name: "Pixel 8",
+      abilities: { photos: { enabled: false, permission: "authorized", shared: 0 }, calendar: { enabled: false, permission: "notDetermined" } },
+    };
     const answer = (body: unknown) => setTimeout(() => listeners.forEach((l) => l({ data: JSON.stringify(body) })), 5);
     (window as unknown as { aioDeviceTools: unknown }).aioDeviceTools = {
       addEventListener: (type: string, listener: (event: { data: string }) => void) => { if (type === "message") listeners.push(listener); },
       postMessage: (raw: string) => {
-        const msg = JSON.parse(raw) as { type: string; seq: number; linkId?: string };
+        const msg = JSON.parse(raw) as { type: string; seq: number; linkId?: string; ability?: "photos" | "calendar"; ids?: string[] };
         sent.push(msg);
-        if (!["status", "account", "link", "unlink"].includes(msg.type)) return answer({ error: "unknown", seq: msg.seq });
-        if (msg.type === "link") {
-          Object.assign(state, { linked: true, linkId: msg.linkId, state: "connecting" });
-          setTimeout(() => { state.state = "online"; window.dispatchEvent(new CustomEvent("aio-device-tools", { detail: structuredClone(state) })); }, 50);
+        const extra: Record<string, unknown> = {};
+        switch (msg.type) {
+          case "status": case "account": case "settings": break;
+          case "link":
+            Object.assign(state, { linked: true, linkId: msg.linkId, state: "connecting" });
+            setTimeout(() => { state.state = "online"; window.dispatchEvent(new CustomEvent("aio-device-tools", { detail: structuredClone(state) })); }, 50);
+            break;
+          case "unlink":
+            Object.assign(state, { linked: false, linkId: null, state: "off" });
+            state.abilities.photos.enabled = state.abilities.calendar.enabled = false;
+            photos = [];
+            state.abilities.photos.shared = 0;
+            break;
+          case "enable":
+            if (msg.ability === "calendar") state.abilities.calendar.permission = denyCalendar ? "denied" : "authorized";
+            state.abilities[msg.ability!].enabled = state.abilities[msg.ability!].permission === "authorized";
+            break;
+          case "disable": state.abilities[msg.ability!].enabled = false; break;
+          case "photosAdd":
+            photos.push({ id: `p${photos.length + 1}`, video: false, thumb }, { id: `p${photos.length + 2}`, video: true, thumb });
+            state.abilities.photos.shared = photos.length;
+            break;
+          case "photosShared": extra.photos = photos; break;
+          case "photosRemove":
+            photos = photos.filter((p) => !msg.ids!.includes(p.id));
+            state.abilities.photos.shared = photos.length;
+            break;
+          default: return answer({ error: "unknown", seq: msg.seq });
         }
-        if (msg.type === "unlink") Object.assign(state, { linked: false, linkId: null, state: "off" });
-        answer({ ...state, seq: msg.seq });
+        answer({ ...structuredClone(state), ...extra, seq: msg.seq });
       },
     };
-  });
+  }, opts.denyCalendar ?? false);
+}
+
+const sentBy = (page: Page) => () => page.evaluate(() => (window as unknown as { __sent: Array<Record<string, unknown>> }).__sent.map(({ seq: _seq, ...rest }) => rest));
+
+test("inside the Android app, one switch links this phone for the account signed in here and unlinks it again", async ({ page }, info) => {
+  await appBridge(page);
   await mockConsole(page, { conversations: [] });
   const calls = await mockLinks(page, [{ id: "dlink_old", name: "Old Galaxy", createdAt: Date.UTC(2026, 9, 1), lastSeenAt: Date.UTC(2026, 9, 2), online: false }]);
   await openSettings(page, info.project.name.startsWith("mobile"));
-  const sent = () => page.evaluate(() => (window as unknown as { __sent: Array<Record<string, unknown>> }).__sent.map(({ seq: _seq, ...rest }) => rest));
+  const sent = sentBy(page);
 
   // The console told the app who is signed in, as soon as it knew; every message carried a number.
   await expect.poll(sent).toContainEqual({ type: "account", account: "owner" });
@@ -71,8 +108,9 @@ test("inside the Android app, one switch links this phone for the account signed
 
   const card = page.getByRole("region", { name: "Android 手机" });
   const toggle = card.getByRole("checkbox", { name: "让 AI 使用这台手机的浏览器和 App 的文件夹" });
-  await expect(card.getByRole("checkbox")).toHaveCount(1);
+  await expect(card.getByRole("checkbox")).toHaveCount(3);
   await expect(toggle).not.toBeChecked();
+  await expect(card).toContainText("「文件」App");
   await expect(card).toContainText("只给当前登录的账号");
   await expect(card).toContainText("Old Galaxy");
 
@@ -98,6 +136,71 @@ test("inside the Android app, one switch links this phone for the account signed
   await expect(card).not.toContainText("已连接");
   // Nothing iPhone-only was asked of the server.
   expect(calls).not.toContain("GET /api/ios-device");
+});
+
+test("inside the Android app, the calendar and the photos the person picks are turned on one by one, the first one linking the phone", async ({ page }, info) => {
+  await appBridge(page);
+  await mockConsole(page, { conversations: [] });
+  const calls = await mockLinks(page, []);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  const sent = sentBy(page);
+  const card = page.getByRole("region", { name: "Android 手机" });
+  const link = card.getByRole("checkbox", { name: "让 AI 使用这台手机的浏览器和 App 的文件夹" });
+  const calendar = card.getByRole("checkbox", { name: "日历" });
+  const photos = card.getByRole("checkbox", { name: "相册" });
+  await expect(calendar).not.toBeChecked();
+  await expect(card).toContainText("看不到整个相册");
+
+  // The calendar on: the app asks Android for the permission then; this phone was not linked, so now it is.
+  await calendar.click();
+  await expect(calendar).toBeChecked();
+  await expect(card.getByRole("status").filter({ hasText: "已允许" })).toBeVisible();
+  await expect(link).toBeChecked();
+  expect(await sent()).toContainEqual({ type: "enable", ability: "calendar" });
+  expect(calls).toContain(`POST /api/device-links ${JSON.stringify({ name: "Pixel 8", kind: "android" })}`);
+  await expect.poll(sent).toContainEqual({ type: "link", token: `dl_${"t".repeat(43)}`, linkId: "dlink_android", account: "owner" });
+
+  // Photos on: nothing is shared until the person picks some in the system's picker; then they are listed.
+  await photos.click();
+  await expect(photos).toBeChecked();
+  await expect(card).toContainText("还没有分享照片");
+  await card.getByRole("button", { name: "选择照片" }).click();
+  await expect(card).toContainText("已分享 2 张");
+  await expect(card.getByRole("img", { name: "分享给 AI 的照片" })).toHaveCount(1);
+  await expect(card.getByRole("img", { name: "分享给 AI 的视频" })).toHaveCount(1);
+  await card.screenshot({ path: info.outputPath("android-phone-abilities.png") });
+  await card.getByRole("button", { name: "移除这张" }).first().click();
+  await expect(card).toContainText("已分享 1 张");
+  expect(await sent()).toContainEqual({ type: "photosRemove", ids: ["p1"] });
+  // Only one link for the phone, however many abilities are on.
+  expect(calls.filter((c) => c.startsWith("POST "))).toHaveLength(1);
+
+  // An ability off leaves the phone linked; the main switch off turns everything off.
+  await calendar.click();
+  await expect(calendar).not.toBeChecked();
+  expect(await sent()).toContainEqual({ type: "disable", ability: "calendar" });
+  await expect(link).toBeChecked();
+  await link.click();
+  await expect(link).not.toBeChecked();
+  await expect(photos).not.toBeChecked();
+  await expect.poll(() => calls).toContain("DELETE /api/device-links/dlink_android");
+  expect(calls).not.toContain("GET /api/ios-device");
+});
+
+test("inside the Android app, a calendar Android refuses says so and opens the phone's settings", async ({ page }, info) => {
+  await appBridge(page, { denyCalendar: true });
+  await mockConsole(page, { conversations: [] });
+  await mockLinks(page, []);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  const card = page.getByRole("region", { name: "Android 手机" });
+  const calendar = card.getByRole("checkbox", { name: "日历" });
+  await calendar.click();
+  await expect(card).toContainText("系统设置里没有允许");
+  await expect(calendar).not.toBeChecked();
+  // Nothing turned on, so the phone is not linked for it.
+  await expect(card.getByRole("checkbox", { name: "让 AI 使用这台手机的浏览器和 App 的文件夹" })).not.toBeChecked();
+  await card.getByRole("button", { name: "去设置开启" }).click();
+  await expect.poll(sentBy(page)).toContainEqual({ type: "settings" });
 });
 
 test("in a browser the card lists the Android phones the account linked, and removes one", async ({ page }, info) => {

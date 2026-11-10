@@ -1,7 +1,9 @@
 package ai.clawpage.agent
 
+import android.Manifest
 import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -32,7 +34,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 // This phone as an execution environment (docs/EXEC-ENVS.md, protocol 1) for the agent of the account signed
-// in here: the app's own browser (AIBrowser.kt) and folder (DeviceFiles.kt). The app dials the control plane
+// in here: the app's own browser (AIBrowser.kt) and folder (DeviceFiles.kt), and what the person turns on one by
+// one in the console: the calendar (DeviceCalendar.kt, which is when Android asks for the permission) and the
+// photos they pick for it (DevicePhotos.kt). The app dials the control plane
 // itself (the device-link socket the Mac and iPhone apps use, kind `android`) with a device token its account
 // issued, and answers the agent's calls while it is on screen; in the background the socket closes and the
 // agent is told to ask the person to open the app, as on the iPhone (DeviceTools.swift).
@@ -49,6 +53,15 @@ private fun trace(message: String) { Log.i(TAG, message) }
 
 private fun failure(code: String, message: String = "") = JSONObject().put("ok", false).put("code", code).put("message", message)
 
+/** What the person turns on one by one; the browser and folder come with the link itself. */
+private enum class Ability(val key: String) { PHOTOS("photos"), CALENDAR("calendar") }
+
+/** What the activity does for the console: Android's permission prompt and the system photo picker. */
+interface DeviceToolsHost {
+  fun askCalendar(done: (Boolean) -> Unit)
+  fun pickPhotos(done: (List<Uri>) -> Unit)
+}
+
 object DeviceTools {
   private val main = Handler(Looper.getMainLooper())
   private lateinit var app: Context
@@ -58,6 +71,8 @@ object DeviceTools {
   /** A debug build linked from its launch extras: the console's account does not turn that link off. */
   private var testLink = false
   private var testURL: String? = null
+  private var activity: WeakReference<Activity>? = null
+  private val work = Executors.newSingleThreadExecutor()
 
   // What the person chose, and the token: a file in the app's no-backup folder (a restored backup on another phone must not carry it).
 
@@ -76,9 +91,31 @@ object DeviceTools {
     var token: String? get() = value("token"); set(v) = keep("token", v)
     var linkId: String? get() = value("linkId"); set(v) = keep("linkId", v)
     var account: String? get() = value("account"); set(v) = keep("account", v)
-    /** Everything about the link goes: the next account starts from nothing. */
-    fun forget() = write(JSONObject())
+    fun enabled(ability: Ability): Boolean = read().optBoolean("enabled.${ability.key}")
+    fun setEnabled(ability: Ability, on: Boolean) = write(JSONObject(read().toString()).put("enabled.${ability.key}", on))
+    /** Whether Android was asked for the calendar once (after that, a refusal can be for good). */
+    var askedCalendar: Boolean get() = read().optBoolean("asked.calendar"); set(v) { write(JSONObject(read().toString()).put("asked.calendar", v)) }
+    /** Everything about the link goes, every ability is off and nothing stays shared: the next account starts from nothing. */
+    fun forget() {
+      write(JSONObject().put("asked.calendar", askedCalendar))
+      DevicePhotos.remove(null)
+    }
   }
+
+  // Permissions: the calendar's is Android's; photos need none (the person picks each one).
+
+  private fun calendarGranted(): Boolean = listOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR)
+    .all { app.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+
+  /** "authorized", "notDetermined" (Android will ask) or "denied" (only the app's system settings can allow it now). */
+  private fun permission(ability: Ability): String = when {
+    ability == Ability.PHOTOS || calendarGranted() -> "authorized"
+    !Store.askedCalendar -> "notDetermined"
+    activity?.get()?.shouldShowRequestPermissionRationale(Manifest.permission.READ_CALENDAR) == true -> "notDetermined"
+    else -> "denied"
+  }
+
+  private fun usable(ability: Ability) = permission(ability) == "authorized"
 
   /** This phone, the same across launches and reinstalls of this app (ANDROID_ID is per app signing key), hashed. */
   private val deviceId: String by lazy {
@@ -92,10 +129,13 @@ object DeviceTools {
 
   fun install(activity: Activity) {
     AIBrowser.attach(activity)
+    this.activity = WeakReference(activity)
     if (installed) return
     installed = true
     app = activity.applicationContext
     DeviceFiles.init(app)
+    DeviceCalendar.init(app)
+    DevicePhotos.init(app)
     foreground = true
     ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
       override fun onStart(owner: LifecycleOwner) { foreground = true; link.cameToFront() }
@@ -120,14 +160,16 @@ object DeviceTools {
     Store.token = token
     Store.linkId = "debug"
     Store.account = "debug"
+    for (ability in Ability.values()) Store.setEnabled(ability, usable(ability))
     link.wanted = true
   }
 
   // What the agent may do here, and how a call reaches it
 
   private fun manifest(): JSONObject {
+    val abilities = Ability.values().filter { Store.enabled(it) && usable(it) }.map { it.key }
     val env = JSONObject().put("deviceId", deviceId).put("kind", "android").put("name", name)
-      .put("capabilities", JSONArray(listOf("browser", "files"))).put("foreground", foreground)
+      .put("capabilities", JSONArray(listOf("browser", "files") + abilities)).put("foreground", foreground)
     return JSONObject().put("protocol", 1).put("envs", JSONArray().put(env))
   }
 
@@ -147,6 +189,29 @@ object DeviceTools {
         JSONObject().put("ok", true).put("result", result)
       } catch (e: FilesError) {
         failure(e.code, e.message)
+      } catch (e: Exception) {
+        failure("failed", e.message ?: e.javaClass.simpleName)
+      }
+    }
+    val ability = when { tool.startsWith("calendar_") -> Ability.CALENDAR; tool.startsWith("photos_") -> Ability.PHOTOS; else -> null }
+    if (ability != null) {
+      if (!Store.enabled(ability)) return failure("off", "${ability.key} is off")
+      if (!usable(ability)) return failure("denied", permission(ability))
+      return try {
+        val result = when (tool) {
+          "calendar_calendars" -> DeviceCalendar.list()
+          "calendar_events" -> DeviceCalendar.events(args)
+          "calendar_create_event" -> DeviceCalendar.create(args)
+          "photos_albums" -> DevicePhotos.albums()
+          "photos_list" -> DevicePhotos.list(args)
+          "photos_get" -> DevicePhotos.fetch(args)
+          else -> return failure("unknown_tool", tool)
+        }
+        JSONObject().put("ok", true).put("result", result)
+      } catch (e: ToolError) {
+        failure(e.code, e.message)
+      } catch (e: SecurityException) {
+        failure("denied", e.message ?: "")
       } catch (e: Exception) {
         failure("failed", e.message ?: e.javaClass.simpleName)
       }
@@ -332,7 +397,10 @@ object DeviceTools {
     .put("linkId", Store.linkId ?: JSONObject.NULL)
     .put("state", if (Store.token == null) (if (link.state == "revoked") "revoked" else "off") else link.state)
     .put("name", name)
-    .put("abilities", JSONObject())
+    .put("abilities", JSONObject().apply {
+      for (ability in Ability.values()) put(ability.key, JSONObject().put("enabled", Store.enabled(ability)).put("permission", permission(ability)))
+      getJSONObject("photos").put("shared", DevicePhotos.count)
+    })
     .put("app", try { app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "" } catch (_: Exception) { "" })
 
   private fun onConsole(webView: WebView): Boolean = Uri.parse(webView.url ?: "").let { it.scheme == "https" && it.host == CONSOLE_HOST }
@@ -383,6 +451,47 @@ object DeviceTools {
         link.wanted = false
         Store.forget()
         answer()
+      }
+      "enable", "disable" -> {
+        val ability = Ability.values().firstOrNull { it.key == body.optString("ability") } ?: return refuse("invalid")
+        val changed = {
+          link.event("manifest", manifest())
+          answer()
+        }
+        if (body.optString("type") == "disable") { Store.setEnabled(ability, false); return changed() }
+        // The calendar's permission is asked now, while the person is turning it on, and only if Android still asks.
+        val host = activity?.get() as? DeviceToolsHost
+        if (ability == Ability.CALENDAR && permission(ability) == "notDetermined" && host != null) {
+          Store.askedCalendar = true
+          host.askCalendar { Store.setEnabled(ability, usable(ability)); changed() }
+        } else {
+          Store.setEnabled(ability, usable(ability))
+          changed()
+        }
+      }
+      "settings" -> {
+        app.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        answer()
+      }
+      "photosAdd" -> {
+        val host = activity?.get() as? DeviceToolsHost ?: return refuse("failed")
+        host.pickPhotos { uris ->
+          work.execute {
+            DevicePhotos.add(uris)
+            main.post { link.event("manifest", manifest()); answer() }
+          }
+        }
+      }
+      "photosShared" -> work.execute {
+        val thumbs = DevicePhotos.thumbnails()
+        main.post { reply(status().put("photos", thumbs).put("seq", seq)) }
+      }
+      "photosRemove" -> {
+        val ids = body.optJSONArray("ids") ?: return refuse("invalid")
+        work.execute {
+          DevicePhotos.remove((0 until ids.length()).map { ids.optString(it) }.toSet())
+          main.post { link.event("manifest", manifest()); answer() }
+        }
       }
       else -> refuse("unknown")
     }

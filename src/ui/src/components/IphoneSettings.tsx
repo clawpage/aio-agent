@@ -61,7 +61,7 @@ export function IphoneSettings() {
     setError(null);
     try {
       let next = await askDeviceTools({ type: on ? "enable" : "disable", ability });
-      if (on && next.abilities[ability].enabled && !thisPhone) {
+      if (on && next.abilities[ability]?.enabled && !thisPhone) {
         // The first ability on: this iPhone gets a link of its own, for the account signed in here.
         const session = await api.session();
         if (!session.username) throw new Error(t.app.iphone.failed);
@@ -69,7 +69,7 @@ export function IphoneSettings() {
         next = await askDeviceTools({ type: "link", token: created.token, linkId: created.link.id, account: session.username });
         await load();
       }
-      if (!on && thisPhone && ABILITIES.every((a) => !next.abilities[a].enabled)) {
+      if (!on && thisPhone && ABILITIES.every((a) => !next.abilities[a]?.enabled)) {
         // Nothing left on: the agent loses this iPhone altogether.
         await api.deleteDeviceLink(thisPhone);
         next = await askDeviceTools({ type: "unlink" });
@@ -108,7 +108,7 @@ export function IphoneSettings() {
       </div>
       {inApp && native && <ul className="iphone-abilities">
         {ABILITIES.map((ability) => {
-          const { enabled, permission } = native.abilities[ability];
+          const { enabled, permission } = native.abilities[ability] ?? { enabled: false, permission: "notDetermined" as const };
           const refused = permission === "denied" || permission === "writeOnly";
           return <li key={ability}>
             <label className="debug-toggle">

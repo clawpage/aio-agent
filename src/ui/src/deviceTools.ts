@@ -1,13 +1,16 @@
 /**
  * The phone app's own abilities for the agent, given to the account signed in here. The iPhone app
  * (src/ui/tauri, DeviceTools.swift) has its Photos, Reminders and Calendar, each turned on by the console
- * (which is when iOS asks for the permission); the Android app (DeviceTools.kt) has only its browser and
- * folder, turned on as a whole by handing it a link. Either way the console hands the app a device token
+ * (which is when iOS asks for the permission); the Android app (DeviceTools.kt) has its browser and folder,
+ * turned on as a whole by handing it a link, and its calendar (Android asks then) and the photos the person picks
+ * for it in the system photo picker, each turned on by the console. Either way the console hands the app a device token
  * its account just issued and says who is signed in; the app answers every message with its state. Only
  * the app's main frame on the console origin has this bridge; a browser never does.
  */
 export type Ability = "photos" | "reminders" | "calendar";
 export const ABILITIES: readonly Ability[] = ["photos", "reminders", "calendar"];
+/** What the Android app has of them: no reminders there (Android has no system reminders). */
+export const ANDROID_ABILITIES: readonly Ability[] = ["photos", "calendar"];
 /** What iOS allows: "limited" is Photos with a selection of photos only; "writeOnly" is not enough to read. */
 export type Permission = "authorized" | "limited" | "denied" | "writeOnly" | "notDetermined";
 export type ToolsState = "off" | "connecting" | "online" | "offline" | "revoked";
@@ -18,12 +21,17 @@ export interface NativeTools {
   state: ToolsState;
   /** This phone's name, offered as the link's name. */
   name: string;
-  /** Empty on Android, which has no abilities to turn on one by one. */
-  abilities: Record<Ability, { enabled: boolean; permission: Permission }>;
+  /** On Android only photos and calendar; `shared` is how many photos the person shared there. */
+  abilities: Partial<Record<Ability, { enabled: boolean; permission: Permission; shared?: number }>>;
+  /** Android, answering `photosShared`: the shared photos, with small copies to recognize them by. */
+  photos?: SharedPhoto[];
 }
 
+export interface SharedPhoto { id: string; video: boolean; thumb: string | null }
+
 type Message =
-  | { type: "status" | "unlink" | "settings" }
+  | { type: "status" | "unlink" | "settings" | "photosAdd" | "photosShared" }
+  | { type: "photosRemove"; ids: string[] }
   | { type: "account"; account: string | null }
   | { type: "link"; token: string; linkId: string; account: string }
   | { type: "enable" | "disable"; ability: Ability };

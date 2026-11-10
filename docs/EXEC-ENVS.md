@@ -35,7 +35,7 @@ offline, comes back as a tool error that says what to do.
 | capability | tools |
 |---|---|
 | `browser` | `browser_open`, `browser_read`, `browser_click`, `browser_type`, `browser_scroll`, `browser_back`, `browser_screenshot`, `browser_request_human` |
-| `files` | `files_list`, `files_pull` (device → workspace), `files_push` (workspace → device) |
+| `files` | `files_list`, `files_pull` (device → workspace), `files_push` (workspace → device); up to 20 MB either way, a pull asked for in parts (below) |
 | `photos` | `photos_albums`, `photos_list`, `photos_get` |
 | `reminders` | `reminders_lists`, `reminders_list`, `reminders_create`, `reminders_complete` |
 | `calendar` | `calendar_calendars`, `calendar_events`, `calendar_create_event` |
@@ -145,12 +145,34 @@ Chrome/…`, client hints brand "Android WebView"), not changed; the app asks We
 `X-Requested-With` header, which WebView 124 (the emulator's) still sent on a main-frame navigation.
 Confirmation, `browser_request_human` and the refusal to type passwords are as on the iPhone.
 
-The console turns it on from Settings → "Android phone" (`AndroidSettings.tsx`): one switch, since the app
-has no abilities to turn on one by one. On creates a device link of kind `android` for the signed-in account
-and hands it to the app; off deletes the link and tells the app to forget it. `deviceTools.ts` speaks to both
-apps: iOS through `webkit.messageHandlers.aioDeviceTools` (the reply is the promise), Android through the
-`aioDeviceTools` web message listener (each message carries a `seq` its answer repeats; `{error}` is a
-refusal).
+The console turns it on from Settings → "Android phone" (`AndroidSettings.tsx`). Its first switch is the
+browser and the app's folder: on creates a device link of kind `android` for the signed-in account and hands
+it to the app; off deletes the link and tells the app to forget it, every ability and every shared photo with
+it. Below, as on the iPhone's page, one switch per ability: `calendar` (Android's permission prompt comes
+then, and only then) and `photos`; turning one on before the phone is linked links it. Every change is told
+to the server as a `manifest` event. `deviceTools.ts` speaks to both apps: iOS through
+`webkit.messageHandlers.aioDeviceTools` (the reply is the promise), Android through the `aioDeviceTools` web
+message listener (each message carries a `seq` its answer repeats; `{error}` is a refusal).
+
+## The Android app's calendar, photos and folder
+
+- **Calendar** (`DeviceCalendar.kt`): the system calendar provider, with `READ_CALENDAR` / `WRITE_CALENDAR`,
+  answering what the iPhone answers for the same three tools (recurring events expanded, all-day events given
+  as that local day from 00:00:00 to 23:59:59). Like the iPhone, no on-device confirmation for a new event: the
+  agent's own rule is to ask the user first when they did not ask for it.
+- **Photos** (`DevicePhotos.kt`): Google Play allows `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO` only to apps
+  whose core function needs the whole library, so the Play build has neither. The person picks photos in the
+  system Photo Picker (no permission) from Settings; the app keeps a persistable read grant for each, and the
+  agent sees exactly those as one album, `shared` ("Shared with AI"). The person removes them there too (the
+  grant goes with them). Same tool shapes as the iPhone; no favorites, no location; at most five 1600-px JPEGs
+  of at most 1.4 MB each per call, so an answer stays one device-link message.
+- **Folder in the Files app**: `AIFilesProvider.kt`, a `DocumentsProvider` only the system can bind to
+  (`MANAGE_DOCUMENTS`), shows `AI Files` under the app's name in the system Files app, as the iPhone's shows
+  in its Files app. No permission.
+- **Large pulls**: a device-link answer is one WebSocket message, base64 twice, and OkHttp sends at most
+  16 MB at once, so `aio_env` asks for `files_pull` in parts (`offset`, `length`, 6 MB each) and puts them
+  together; a device that answers with `size` gets asked for the rest, one that answers whole (the iPhone
+  app) is taken at its word. The limit is the workspace's, 20 MB.
 
 ## Distribution
 
@@ -166,7 +188,8 @@ refusal).
 
 1. Control plane: environment registry, `aio_env`, adapters for old devices, the brief. (iOS first.)
 2. iPhone app: `/env/manifest`, `/env/call`, the in-app browser and files, foreground events.
-3. Android app (Play build): device link, browser, files, the console's switch (done), photos, calendar.
+3. Android app (Play build): device link, browser, files, the console's settings, calendar, the photos the
+   person picks, the folder in the Files app, 20 MB pulls (done; 0.1.6).
 4. Android APK: pairing, shell helper, virtual display, `apps` / `screen`.
 
 ## Retiring the old servers
@@ -185,6 +208,7 @@ speaking protocol 1 are live and the device-link log shows no old-protocol devic
 - `tests/devices/android.e2e.test.ts`: the real Android app (the Play build) in the emulator against a local
   control plane: the same behaviours as the iPhone's, typing in Chinese included, and the console's own
   `deviceTools.ts` (put into the app's console page through DevTools, since that page is the deployed one)
-  linking and unlinking it as the settings page does.
+  linking and unlinking it as the settings page does, turning the calendar on through Android's real prompt,
+  picking photos in the real Photo Picker, a 13 MB pull, and the folder shown in the Files app.
 - `tests/e2e/android-phone.spec.ts` and `iphone-abilities.spec.ts`: the two settings pages against a stand-in
   bridge (`playwright.local.config.ts`).

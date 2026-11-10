@@ -176,10 +176,14 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
 - Android as an execution environment (docs/EXEC-ENVS.md): `DeviceTools.kt` links the app to the account
   signed in here and answers the agent over `wss://agent.clawpage.ai/api/device-link/connect` (kind `android`, OkHttp
   WebSocket, the one Gradle dependency it adds) while the app is in the foreground; `AIBrowser.kt` is the agent's browser
-  panel over the console and `DeviceFiles.kt` its folder (`Android/data/ai.clawpage.agent/files/AI Files`); see "Android
-  App 的浏览器与文件夹" in `docs/FEATURES.md`. The console's main frame talks to it through the `aioDeviceTools` web
-  message listener (`status`, `account`, `link`, `unlink`; JSON strings with a `seq` the answer repeats), from
-  Settings → "Android phone" (`AndroidSettings.tsx`, one switch). The token is in `noBackupFilesDir/device-link.json`. Native strings
+  panel over the console and `DeviceFiles.kt` its folder (`Android/data/ai.clawpage.agent/files/AI Files`, shown in the
+  system Files app by `AIFilesProvider.kt`); `DeviceCalendar.kt` the calendar (`READ_CALENDAR` / `WRITE_CALENDAR`, asked
+  when the person turns it on) and `DevicePhotos.kt` the photos the person picks in the system Photo Picker (no media
+  permission: Play allows those only to gallery apps); see "Android App 的浏览器、文件夹、日历与相册" in `docs/FEATURES.md`.
+  The console's main frame talks to it through the `aioDeviceTools` web message listener (`status`, `account`, `link`,
+  `unlink`, `enable` / `disable`, `settings`, `photosAdd`, `photosShared`, `photosRemove`; JSON strings with a `seq` the
+  answer repeats), from Settings → "Android phone" (`AndroidSettings.tsx`). The token and the switches are in
+  `noBackupFilesDir/device-link.json`, the shared photos in `noBackupFilesDir/shared-photos.json`. Native strings
   (panel, confirmation) are in `values*/strings.xml` in five languages (`values-b+zh+Hant` is Traditional Chinese).
   Debug builds only (`BuildConfig.DEBUG`): `adb -s <emulator> shell am start -n ai.clawpage.agent/.MainActivity --es
   AIODeviceToolsLinkURL ws://10.0.2.2:<port>/api/device-link/connect --es AIODeviceToolsLinkToken dl_… [--es
@@ -270,7 +274,9 @@ architectures. Outputs are under `src-tauri/gen/android/app/build/outputs/`:
 `apksigner verify --verbose --print-certs`, the AAB with `jarsigner -verify`, and
 native ZIP alignment with `zipalign -c -P 16 -v 4`. The ELF LOAD segments must also
 align to at least 16 KB. Keep the package identifier stable and increase the
-Android version code for subsequent Play uploads.
+Android version code for subsequent Play uploads. The Android version can run ahead of iOS's:
+`src-tauri/tauri.android.conf.json` overrides `version` for Android builds only (0.1.6 → versionCode 1006);
+remove it once both platforms ship the same version again.
 
 A release certificate cannot update an installed debug-signed package. Preserve
 the phone's data when validating: use a test copy re-signed with its existing

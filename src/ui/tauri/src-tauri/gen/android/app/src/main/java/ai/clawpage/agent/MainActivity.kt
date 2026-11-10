@@ -25,13 +25,16 @@ import android.webkit.CookieManager
 import android.widget.Toast
 import android.view.View
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 
-class MainActivity : TauriActivity() {
+class MainActivity : TauriActivity(), DeviceToolsHost {
   private var authWebView: WebView? = null
   private var authReady = false
   private var pendingAuth: String? = null
@@ -107,9 +110,33 @@ class MainActivity : TauriActivity() {
     if (storageWaiting.size == 1) requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), STORAGE_REQUEST)
   }
 
+  // For the console's Android settings (DeviceTools.kt): the calendar's permission, and the photos the person shares.
+  private val calendarWaiting = ArrayList<(Boolean) -> Unit>()
+  private var photosWaiting: ((List<Uri>) -> Unit)? = null
+  private lateinit var photoPicker: ActivityResultLauncher<PickVisualMediaRequest>
+
+  override fun askCalendar(done: (Boolean) -> Unit) {
+    calendarWaiting.add(done)
+    if (calendarWaiting.size == 1) requestPermissions(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR), CALENDAR_REQUEST)
+  }
+
+  /** The system photo picker (no permission): what the person picks, or nothing when they go back. */
+  override fun pickPhotos(done: (List<Uri>) -> Unit) {
+    photosWaiting?.invoke(emptyList())
+    photosWaiting = done
+    photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+  }
+
   @Deprecated("Deprecated in Java")
   override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
     super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if (requestCode == CALENDAR_REQUEST) {
+      val granted = grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+      val waiting = calendarWaiting.toList()
+      calendarWaiting.clear()
+      waiting.forEach { it(granted) }
+      return
+    }
     if (requestCode != STORAGE_REQUEST) return
     val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
     val waiting = storageWaiting.toList()
@@ -245,6 +272,7 @@ class MainActivity : TauriActivity() {
   }
   companion object {
     private const val STORAGE_REQUEST = 7301
+    private const val CALENDAR_REQUEST = 7302
   }
   override fun onDestroy() {
     networkCallback?.let { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(it) }
@@ -258,6 +286,11 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
+    photoPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+      val done = photosWaiting
+      photosWaiting = null
+      done?.invoke(uris)
+    }
     receiveAuth(intent)
     DeviceTools.install(this)
     DeviceTools.debugLink(intent)

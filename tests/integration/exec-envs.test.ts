@@ -303,6 +303,34 @@ describe("Android, however it is connected", () => {
     await agent.call("screen_tap", { env: phones[0]!.id, x: 7, y: 8 });
     expect(mac.seen.filter((s) => s.path === "/mcp" && s.body.method === "tools/call").at(-1)?.body.params).toEqual({ name: "mobile_click_on_screen_at_coordinates", arguments: { device: "R5CT40ABCDE", x: 7, y: 8 } });
   });
+
+  it("takes a file larger than one device message in parts, up to the workspace's limit", async () => {
+    const alice = await signIn("alice");
+    const runtime = runtimeFor(alice.id, 18112);
+    const agent = executor(runtime);
+    const MB = 1024 * 1024;
+    const files: Record<string, Buffer> = { "video.mp4": Buffer.alloc(13 * MB, 7), "huge.zip": Buffer.alloc(21 * MB) };
+    files["video.mp4"]!.write("start", 0);
+    files["video.mp4"]!.write("end", 13 * MB - 3);
+    const pixel = await connect(device(url, await link(alice, "android", "Pixel"), "Pixel 8", ({ path, body }) => {
+      if (path === "/env/manifest") return { status: 200, body: { protocol: 1, envs: [{ deviceId: "android-id-pixel", kind: "android", name: "Pixel 8", capabilities: ["files"], foreground: true }] } };
+      const { name, offset, length } = body.arguments as { name: string; offset: number; length: number };
+      const file = files[name]!;
+      return { status: 200, body: { ok: true, result: { name, data: file.subarray(offset, offset + length).toString("base64"), offset, size: file.length } } };
+    }), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "android")!.id;
+
+    const out = await agent.call("files_pull", { env, name: "video.mp4", to: "/home/gem/workspace/in/" });
+    expect(agent.text(out)).toContain(`Saved /home/gem/workspace/in/video.mp4 (${13 * MB} bytes)`);
+    expect(saved.get("/home/gem/workspace/in/video.mp4")?.bytes.equals(files["video.mp4"]!)).toBe(true);
+    // Each part fits in one message from a phone; the device is asked for the next one where the last ended.
+    expect(pixel.calls().map((c) => c.arguments)).toEqual([0, 6, 12].map((at) => ({ name: "video.mp4", offset: at * MB, length: 6 * MB })));
+
+    const big = await agent.call("files_pull", { env, name: "huge.zip" });
+    expect(big.isError).toBe(true);
+    expect(agent.text(big)).toMatch(/larger than 20 MB/);
+    expect(pixel.calls()).toHaveLength(4);
+  });
 });
 
 describe("patience", () => {

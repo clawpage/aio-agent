@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import type { DeviceLink } from "../types";
 import { locale, t } from "../i18n";
-import { askDeviceTools, hasDeviceTools, listenDeviceTools, type NativeTools } from "../deviceTools";
+import { ANDROID_ABILITIES, askDeviceTools, hasDeviceTools, listenDeviceTools, type Ability, type NativeTools, type SharedPhoto } from "../deviceTools";
 
 const day = (ms: number) => new Date(ms).toLocaleDateString(locale);
 
@@ -20,10 +20,12 @@ export function useAndroidEntry(): boolean {
 }
 
 /**
- * The configuration page's Android phone (DeviceTools.kt in the app): its browser and the app's folder for
- * the agent. Inside the Android app: one switch; on links this phone to the signed-in account, off removes
- * the link. Anywhere: the Android phones this account linked, which it can remove. Hidden in a browser for
- * an account that never linked one.
+ * The configuration page's Android phone (DeviceTools.kt in the app). Inside the Android app: a switch for its
+ * browser and the app's folder, which links this phone to the signed-in account (off removes the link and turns
+ * everything off), and one per ability, as on the iPhone: the calendar (Android asks for the permission then)
+ * and the photos the person picks for the agent in the system photo picker, listed here to add to or remove
+ * from. An ability turned on before the phone is linked links it. Anywhere: the Android phones this account
+ * linked, which it can remove. Hidden in a browser for an account that never linked one.
  */
 export function AndroidSettings() {
   const inApp = hasDeviceTools("android");
@@ -31,6 +33,7 @@ export function AndroidSettings() {
   const [links, setLinks] = useState<DeviceLink[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [photos, setPhotos] = useState<SharedPhoto[] | null>(null);
 
   const load = useCallback(async () => {
     try { setLinks((await api.deviceLinks("android")).links); } catch { setLinks((l) => l ?? []); }
@@ -44,28 +47,57 @@ export function AndroidSettings() {
     if (next.state === "online" || next.state === "revoked") void load();
   }) : undefined, [inApp, load]);
 
-  const thisPhone = native?.linked && native.linkId && links?.some((l) => l.id === native.linkId) ? native.linkId : null;
+  const refreshNative = useCallback(() => { if (inApp) void askDeviceTools({ type: "status" }).then(setNative, () => undefined); }, [inApp]);
+  // Back from the phone's settings, where the calendar may have just been allowed.
+  useEffect(() => {
+    const back = () => { if (document.visibilityState === "visible") refreshNative(); };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
+  }, [refreshNative]);
 
-  const toggle = async (on: boolean) => {
+  const thisPhone = native?.linked && native.linkId && links?.some((l) => l.id === native.linkId) ? native.linkId : null;
+  const sharing = Boolean(native?.abilities.photos?.enabled);
+  useEffect(() => {
+    if (!sharing) { setPhotos(null); return; }
+    void askDeviceTools({ type: "photosShared" }).then((next) => setPhotos(next.photos ?? []), () => undefined);
+  }, [sharing, native?.abilities.photos?.shared]);
+
+  /** This phone's own link, for the account signed in here: what the app answers with it. */
+  const linkThisPhone = async (name: string) => {
+    const session = await api.session();
+    if (!session.username) throw new Error(t.app.android.failed);
+    const created = await api.createDeviceLink(name, "android");
+    const next = await askDeviceTools({ type: "link", token: created.token, linkId: created.link.id, account: session.username });
+    await load();
+    return next;
+  };
+
+  /** Runs one change and shows the state after it; anything that fails says so and reads the app's state again. */
+  const change = async (work: () => Promise<NativeTools>) => {
     setBusy(true);
     setError(null);
     try {
-      if (on) {
-        const session = await api.session();
-        if (!session.username || !native) throw new Error(t.app.android.failed);
-        const created = await api.createDeviceLink(native.name, "android");
-        setNative(await askDeviceTools({ type: "link", token: created.token, linkId: created.link.id, account: session.username }));
-      } else {
-        if (thisPhone) await api.deleteDeviceLink(thisPhone);
-        setNative(await askDeviceTools({ type: "unlink" }));
-      }
-      await load();
+      setNative(await work());
     } catch {
       setError(t.app.android.failed);
+      refreshNative();
     } finally {
       setBusy(false);
     }
   };
+
+  const toggle = (on: boolean) => change(async () => {
+    if (on) return linkThisPhone(native!.name);
+    if (thisPhone) await api.deleteDeviceLink(thisPhone);
+    const next = await askDeviceTools({ type: "unlink" });
+    await load();
+    return next;
+  });
+
+  const toggleAbility = (ability: Ability, on: boolean) => change(async () => {
+    const next = await askDeviceTools({ type: on ? "enable" : "disable", ability });
+    return on && next.abilities[ability]?.enabled && !thisPhone ? linkThisPhone(next.name) : next;
+  });
 
   const remove = async (id: string) => {
     setError(null);
@@ -95,7 +127,31 @@ export function AndroidSettings() {
             <span>{t.app.android.toggle}</span>
           </label>
           <span className="muted tiny">{t.app.android.hint}</span>
+          <span className="muted tiny">{t.app.android.filesApp}</span>
         </li>
+        {ANDROID_ABILITIES.map((ability) => {
+          const { enabled = false, permission = "notDetermined", shared = 0 } = native.abilities[ability] ?? {};
+          const label = ability === "photos" ? t.app.android.abilities.photos : t.app.android.abilities.calendar;
+          return <li key={ability}>
+            <label className="debug-toggle">
+              <input type="checkbox" checked={enabled} disabled={busy} onChange={(event) => void toggleAbility(ability, event.target.checked)} />
+              <span>{label}</span>
+            </label>
+            <span className="muted tiny">{ability === "photos" ? t.app.android.hints.photos : t.app.android.hints.calendar}</span>
+            {ability === "calendar" && (enabled || permission === "denied") && <span className="muted tiny" role="status">{t.app.android.permission[permission === "authorized" || permission === "denied" ? permission : "notDetermined"]}</span>}
+            {ability === "calendar" && permission === "denied" && <button type="button" onClick={() => void askDeviceTools({ type: "settings" })}>{t.app.android.openSettings}</button>}
+            {ability === "photos" && enabled && <>
+              <span className="muted tiny" role="status">{shared ? t.app.android.photosShared(shared) : t.app.android.photosNone}</span>
+              {photos && photos.length > 0 && <ul className="android-photos">
+                {photos.map((p) => <li key={p.id}>
+                  {p.thumb ? <img src={p.thumb} alt={p.video ? t.app.android.videoAlt : t.app.android.photoAlt} /> : <span className="android-photo-blank" />}
+                  <button type="button" className="link danger-text" disabled={busy} onClick={() => void change(() => askDeviceTools({ type: "photosRemove", ids: [p.id] }))}>{t.app.android.photosRemove}</button>
+                </li>)}
+              </ul>}
+              <button type="button" disabled={busy} onClick={() => void change(() => askDeviceTools({ type: "photosAdd" }))}>{t.app.android.photosAdd}</button>
+            </>}
+          </li>;
+        })}
       </ul>}
       {inApp && thisPhone && native && <p className="muted tiny" role="status">{t.app.android.state[native.state]} · {t.app.android.foreground}</p>}
       {error && <p className="banner error" role="alert">{error}</p>}

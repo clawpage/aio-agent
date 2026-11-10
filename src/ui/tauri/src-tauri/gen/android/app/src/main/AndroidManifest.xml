@@ -8,6 +8,10 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Saving an image or video into the gallery: Android 10+ adds to MediaStore without it; 7-9 need it. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- The calendar for the agent (DeviceCalendar.kt): asked only when the person turns it on in the console's settings.
+         Photos need no permission: the person picks them in the system photo picker (DevicePhotos.kt). -->
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <uses-permission android:name="android.permission.WRITE_CALENDAR" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -36,6 +40,18 @@
                 <data android:scheme="aioagent" android:host="auth" />
             </intent-filter>
         </activity>
+
+        <!-- The agent's folder in the system Files app (AIFilesProvider.kt); only the system can bind to it. -->
+        <provider
+          android:name=".AIFilesProvider"
+          android:authorities="${applicationId}.documents"
+          android:exported="true"
+          android:grantUriPermissions="true"
+          android:permission="android.permission.MANAGE_DOCUMENTS">
+          <intent-filter>
+            <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+          </intent-filter>
+        </provider>
 
         <provider
           android:name="androidx.core.content.FileProvider"

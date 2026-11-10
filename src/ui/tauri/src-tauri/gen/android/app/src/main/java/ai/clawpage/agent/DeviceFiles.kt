@@ -5,25 +5,30 @@ import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
 // The agent's folder on this phone (docs/EXEC-ENVS.md, capability `files`): `AI Files` in the app's own
-// storage (Android/data/ai.clawpage.agent/files, no storage permission). The agent lists it, copies files
-// from it into its workspace and puts files there for the person; nothing outside this folder is reachable.
+// storage (Android/data/ai.clawpage.agent/files, no storage permission), which the system Files app shows under
+// the app's name (AIFilesProvider.kt). The agent lists it, copies files from it into its workspace and puts files
+// there for the person; nothing outside this folder is reachable.
 
 class FilesError(val code: String, override val message: String) : Exception(message)
 
 object DeviceFiles {
-  /** A file the agent puts here may be as large as on the iPhone. */
-  private const val MAX_PUSH_BYTES = 20 * 1024 * 1024
+  /** A file the agent puts here or takes from here may be as large as the control plane moves (MAX_FILE_BYTES in gateway.ts). */
+  private const val MAX_BYTES = 20 * 1024 * 1024
   /**
-   * One the agent takes is smaller: its answer goes up the device link as one message, base64 twice
-   * (the file in the answer, the answer in the frame), and the socket sends at most 16 MB at once.
+   * A file taken goes up the device link in parts the control plane asks for one by one (`offset`, `length`):
+   * each answer is one message, base64 twice (the part in the answer, the answer in the frame), and the socket
+   * sends at most 16 MB at once.
    */
-  private const val MAX_PULL_BYTES = 8 * 1024 * 1024
+  private const val MAX_PART_BYTES = 6 * 1024 * 1024
+  /** A control plane from before the parts asks for the whole file in one answer. */
+  private const val MAX_WHOLE_BYTES = 8 * 1024 * 1024
 
   private lateinit var context: Context
 
@@ -62,8 +67,16 @@ object DeviceFiles {
     if (name.isEmpty()) throw FilesError("invalid", "name is required")
     val file = inside(name)
     if (!file.isFile) throw FilesError("not_found", name)
-    if (file.length() > MAX_PULL_BYTES) throw FilesError("invalid", "larger than ${MAX_PULL_BYTES / 1024 / 1024} MB")
-    return JSONObject().put("name", file.name).put("data", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+    val size = file.length()
+    if (size > MAX_BYTES) throw FilesError("invalid", "larger than ${MAX_BYTES / 1024 / 1024} MB")
+    if (!args.has("offset")) {
+      if (size > MAX_WHOLE_BYTES) throw FilesError("invalid", "larger than ${MAX_WHOLE_BYTES / 1024 / 1024} MB")
+      return JSONObject().put("name", file.name).put("data", Base64.encodeToString(file.readBytes(), Base64.NO_WRAP))
+    }
+    val offset = args.optLong("offset").coerceIn(0, size)
+    val part = ByteArray(minOf(args.optLong("length", MAX_PART_BYTES.toLong()).coerceIn(1, MAX_PART_BYTES.toLong()), size - offset).toInt())
+    RandomAccessFile(file, "r").use { it.seek(offset); it.readFully(part) }
+    return JSONObject().put("name", file.name).put("data", Base64.encodeToString(part, Base64.NO_WRAP)).put("offset", offset).put("size", size)
   }
 
   /** Saved under its name; a name already there gets " (2)", " (3)", … rather than replacing what the person has. */
@@ -72,7 +85,7 @@ object DeviceFiles {
     val encoded = args.optString("data", "")
     if (name.isEmpty() || name == "." || name == ".." || !args.has("data")) throw FilesError("invalid", "name and data are required")
     val data = try { Base64.decode(encoded, Base64.DEFAULT) } catch (_: IllegalArgumentException) { throw FilesError("invalid", "name and data are required") }
-    if (data.size > MAX_PUSH_BYTES) throw FilesError("invalid", "larger than 20 MB")
+    if (data.size > MAX_BYTES) throw FilesError("invalid", "larger than ${MAX_BYTES / 1024 / 1024} MB")
     val dot = name.lastIndexOf('.')
     val base = if (dot > 0) name.substring(0, dot) else name
     val ext = if (dot > 0) name.substring(dot + 1) else ""

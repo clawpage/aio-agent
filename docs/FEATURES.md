@@ -1059,22 +1059,32 @@ iOS App 可以把那台 iPhone 的相册、提醒事项和日历交给**在这�
 - **写入要确认**：执行规则要求只在用户要求或确认后才添加/完成提醒事项、添加日程；写入途中连接中断时报告“是否已保存未知，先列出核对再重试”，不自动重发。
 - **日志**：控制面每次调用记一行（账号、工具、成败、耗时、照片张数与字节数），App 记工具名与成败；都不记内容。
 
-### Android App 的浏览器与文件夹
+### Android App 的浏览器、文件夹、日历与相册
 
-Android App（Google Play 版）是一个执行环境（`docs/EXEC-ENVS.md`，种类 `android`，设备协议 1），给**在这台手机上登录的账号**的执行器两样东西：App 自己的浏览器（`browser`）和 App 自己的文件夹（`files`），经 `aio_env`（`PA_EXEC_ENVS=1` 时）。
-App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/agent/`：`DeviceTools.kt`（连接、清单、调用）、`AIBrowser.kt`、`DeviceFiles.kt`。没有无障碍服务，不申请新的危险权限，不读相册。
+Android App（Google Play 版，0.1.6 起含日历与相册）是一个执行环境（`docs/EXEC-ENVS.md`，种类 `android`，设备协议 1），给**在这台手机上登录的账号**的执行器：App 自己的浏览器（`browser`）和 App 自己的文件夹（`files`），以及用户在配置页逐项打开的日历（`calendar`）和用户亲手挑给 AI 的照片（`photos`），经 `aio_env`（`PA_EXEC_ENVS=1` 时）。
+App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/agent/`：`DeviceTools.kt`（连接、清单、调用、配置页消息）、`AIBrowser.kt`、`DeviceFiles.kt`、`AIFilesProvider.kt`（系统「文件」App 里的文件夹）、`DeviceCalendar.kt`、`DevicePhotos.kt`。没有无障碍服务；危险权限只有日历（`READ_CALENDAR` / `WRITE_CALENDAR`，用户在配置页打开日历时才弹系统授权）；不申请 `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO`，不读整个相册。
 
 - **连接**：与 iPhone 相同的规则。App 自己（OkHttp WebSocket）连 `wss://<主站>/api/device-link/connect`（连接种类 `android`），回答 `GET /env/manifest`（`deviceId` 是 `ANDROID_ID` 的哈希，名称取系统设备名）和 `POST /env/call`，回到前台时推送 `manifest` 事件；退到后台时（等手头的调用答完，最多 5 秒）断开，回到前台立即重连。
   令牌和它属于的账号存在 App 的 no-backup 目录（`device-link.json`，备份不带走）；连接被移除（4001）或令牌失效（401）时 App 忘掉令牌。
-  控制台经 `aioDeviceTools`（只对主站主框架注入，JSON 字符串，带 `seq`，回答带同一个 `seq`）交令牌（`link`）、说明当前账号（`account`：同一账号才连接，退出登录断开，换别的账号登录即忘掉令牌）、`unlink`、`status`。
-- **配置页「Android 手机」**（`AndroidSettings.tsx`，五种语言）：在 Android App 里只有一个开关「让 AI 使用这台手机的浏览器和 App 的文件夹」——打开时为当前账号新建一个种类 `android` 的连接（名称取手机名）交给 App，关闭时删掉这个连接并让 App 忘掉它；下面一行是连接状态和「一站 App 开在屏幕上时才能用」，再下面是这个账号的其他 Android 手机（可移除）。没有逐项能力。浏览器里只在账号连过 Android 手机时出现，只列出和移除。
+  控制台经 `aioDeviceTools`（只对主站主框架注入，JSON 字符串，带 `seq`，回答带同一个 `seq`）交令牌（`link`）、说明当前账号（`account`：同一账号才连接，退出登录断开，换别的账号登录即忘掉令牌）、`unlink`、`status`，
+  以及逐项能力：`enable` / `disable`（`ability` 为 `calendar` 或 `photos`，其他回 `invalid`）、`settings`（打开本 App 的系统设置）、`photosAdd`（打开系统照片选择器）、`photosShared`（已分享照片的列表与小缩略图）、`photosRemove`（`ids`）。每次变化都推送 `manifest` 事件。
+  `unlink`、换账号与连接被移除时，所有能力关掉、已分享的照片全部撤回（连同长期读取授权）。
+- **配置页「Android 手机」**（`AndroidSettings.tsx`，五种语言）：在 Android App 里，第一个开关「让 AI 使用这台手机的浏览器和 App 的文件夹」——打开时为当前账号新建一个种类 `android` 的连接（名称取手机名）交给 App，关闭时删掉这个连接、让 App 忘掉它并关掉所有能力；下面按 iPhone 页的样子逐项列出「相册」「日历」，各一个开关和一句说明。
+  先打开某项能力而手机还没连接时，同时建立连接（只建一次）；关掉某项能力不断开连接。日历打开时 Android 才询问权限，状态写「已允许」「打开时系统会询问」或「系统设置里没有允许」（拒绝过两次后系统不再询问，此时有「去设置开启」按钮，从系统设置回来自动刷新）。
+  相册打开后显示「已分享 N 张」、已分享照片的缩略图（每张可「移除这张」）和「选择照片」。再下面一行是连接状态和「一站 App 开在屏幕上时才能用」，最后是这个账号的其他 Android 手机（可移除）。浏览器里只在账号连过 Android 手机时出现，只列出和移除。
   `deviceTools.ts` 同时认两种桥接（iOS 的 `webkit.messageHandlers.aioDeviceTools`、Android 的 `aioDeviceTools` 加 `seq`），「iPhone 能力」只在 iOS App 里显示开关，Android App 里不出现（账号连过 iPhone 时按浏览器的样子列出）；`syncDeviceToolsAccount` 两种 App 都发。不调用 `/api/ios-device`。
 - **浏览器**：控制台之上的一个小窗（实时缩小的页面），点开全屏，有「最小化」「关闭」，返回键先后退、再缩小；它有自己的 WebView profile，登录状态与控制台分开。
   Android 的 WebView 没有隔离的脚本世界，所以读页和操作的脚本运行在页面自己的世界里，但不留下任何东西（不加属性、节点、全局变量，不改原型）；元素的 ref 是它在页面控件里的序号，每次按同一方式重新找到，并核对上次读页时的指纹，页面变了就让 AI 重新读。
   点击是对元素中心的真实触摸（页面停稳后测量），输入是键盘的文字（经 WebView 自己的输入连接，支持中文）、回车是真实按键，滚动是手指滑动，页面看到的事件都是 `isTrusted`。只有真实输入做不到时才用脚本：元素被遮住或无法滚到屏幕上的点击、下拉框的取值、键盘连接没送到的文字（都记日志）。
   不改 User-Agent（WebView 自己的，带 `; wv`）；请求 WebView 不发 `X-Requested-With`（模拟器里的 WebView 124 仍在主框架导航上发送）。付款、下单、发送、删除、登录授权类的点击先在手机上弹窗确认，`browser_request_human` 全屏显示 AI 的请求和「完成，交还给 AI」，密码不代填，与 iPhone 相同。
 - **文件夹**：App 专属存储里的 `AI Files`（`Android/data/ai.clawpage.agent/files/AI Files`，不需要存储权限），`files_list` / `files_pull` / `files_push`，路径出不了这个文件夹；同名文件存为「名 (2)」。
-  放进手机的文件最大 20 MB；取回工作区的最大 8 MB（应答在设备连接上是一条消息，两次 base64 后不能超过 OkHttp 单条 16 MB 的发送上限）。
+  放进手机和取回工作区的文件都最大 20 MB（与 `aio_env` 的 `MAX_FILE_BYTES` 相同）。取回时控制面按段要（`offset` / `length`，每段 6 MB），App 每段回一条消息并带上文件总大小，控制面拼起来再存：一条应答两次 base64 后不能超过 OkHttp 单条 16 MB 的发送上限。不带 `offset` 的整份请求（还不会按段取回的控制面）仍只给 8 MB 以内的文件；iPhone App 不认 `offset`，照旧整份回答（不带 `size`），控制面也照旧接收。
+  这个文件夹也出现在系统自带的「文件」App 里（`AIFilesProvider`，一个只允许系统绑定的 `DocumentsProvider`，名称是 App 名），用户在那里打开、添加、改名、删除文件；不需要任何权限，也只提供这个文件夹。
+- **日历**（`DeviceCalendar.kt`）：系统日历提供者（`CalendarContract`），工具与回答形状与 iPhone 相同：`calendar_calendars`（`id`、`title`、`account`、`writable`、`default`：可写的主日历，否则第一个可写的）、`calendar_events`（按实例展开重复日程，按开始时间排序，范围最多 366 天，默认 100 条、最多 300）、`calendar_create_event`（不给结束时间时一小时；只给日期是全天事件，按 Android 的约定存成 UTC 零点到次日零点，读回时与 iPhone 一样给本地当天 00:00:00 到 23:59:59）。
+  与 iPhone 一样不在手机上再弹确认：添加前问不问用户由 AI 按「你没要求时先问你」的规则决定。用户没打开日历时回 `off`，系统没授权时回 `denied`。
+- **相册**（`DevicePhotos.kt`）：Google Play 只允许以相册为核心功能的 App 申请 `READ_MEDIA_IMAGES` / `READ_MEDIA_VIDEO`，所以 App 不读相册：用户在系统照片选择器（Photo Picker，不需要权限）里挑照片或视频，App 为每一张保留长期读取授权（`takePersistableUriPermission`），AI 只看得到这些，作为一个相册「Shared with AI」（`id` 为 `shared`）。
+  选择时记下拍摄时间（选择器给的 `DATE_TAKEN`，没有时取 EXIF）、宽高（按 EXIF 方向）、视频时长；分享列表存在 no-backup 目录（`shared-photos.json`）。`photos_list` 按日期、媒体类型过滤（没有收藏信息，`favorite` 恒为 false，不带位置），`photos_get` 每次最多 5 张，缩到最长边 1600 以内（视频取一帧），每张 JPEG 不超过 1.4 MB（5 张两次 base64 后仍在一条消息以内）。
+  用户在配置页移除时连同授权一起撤回；原图被用户从图库删掉后，`photos_get` 把它列为找不到。
 
 ### Clawpages（可分享、可存数据的页面）
 

@@ -28,6 +28,12 @@ const TIMEOUT_SEC = Math.max(TAB_TOOL_TIMEOUT_SEC, MAX_CALL_TIMEOUT_MS / 1000 + 
 const MAX_PHOTOS = 5;
 const MAX_PICTURE_BYTES = 8 * 1024 * 1024;
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
+/**
+ * A file comes from a device in parts this size: each answer is one device-link message, base64 twice (the part
+ * in the answer, the answer in the frame), and a phone's socket sends at most 16 MB at once. A device that
+ * answers with the whole file (no `size`) is taken at its word.
+ */
+const PULL_PART_BYTES = 6 * 1024 * 1024;
 
 /** The account's workspace files, as aio_env moves them (any file, not only pictures). */
 export interface EnvFiles {
@@ -148,7 +154,8 @@ export class EnvGateway extends McpGateway {
       case "unable": done(false, { reason: "unable" }); return error(`${out.env.name} ${UNABLE[out.capability]}.`);
       case "failed": done(false, { reason: "no answer" }); return error(`${out.env.name} did not answer in time${TOOL_CAPABILITY.get(tool) && /create|complete|push|click|type|tap|open|bash|write|edit/.test(tool) ? "; whether it was done is unknown: check before trying again" : ""}.`);
     }
-    const answer: EnvAnswer = out.answer;
+    let answer: EnvAnswer = out.answer;
+    if (tool === "files_pull" && answer.ok) answer = await this.#rest(userId, { username, headers }, envId, prepared.args, answer.result);
     if (!answer.ok) { done(false, { reason: answer.code ?? "error" }); return error(this.#explain(out.env.name, tool, answer)); }
     done(true);
     return this.#result(userId, out.env.kind, tool, prepared, answer.result);
@@ -168,7 +175,7 @@ export class EnvGateway extends McpGateway {
     if (tool === "files_pull") {
       const folder = this.#folder(args.to, "device-files");
       if ("error" in folder) return folder;
-      return { args: { name: args.name }, folder: folder.path };
+      return { args: { name: args.name, offset: 0, length: PULL_PART_BYTES }, folder: folder.path };
     }
     if (tool === "files_push") {
       const checked = requireWorkspaceFilePath(String(args.path ?? ""), this.#workspace);
@@ -179,6 +186,27 @@ export class EnvGateway extends McpGateway {
       return { args: { name: path.posix.basename(checked.path), data: bytes.toString("base64") } };
     }
     return { args };
+  }
+
+  /** The rest of a file a device sends in parts, asked for one after another and put together. */
+  async #rest(userId: string, caller: { username: string; headers: http.IncomingHttpHeaders }, envId: string, args: Record<string, unknown>, first: unknown): Promise<EnvAnswer> {
+    const part = (r: unknown) => r as { name?: unknown; data?: unknown; size?: unknown };
+    const head = part(first);
+    if (typeof head.size !== "number") return { ok: true, result: first };
+    if (head.size > MAX_FILE_BYTES) return { ok: false, code: "invalid", message: `larger than ${MAX_FILE_BYTES / 1024 / 1024} MB` };
+    const parts = [Buffer.from(typeof head.data === "string" ? head.data : "", "base64")];
+    let got = parts[0].length;
+    while (got < head.size) {
+      const out = await this.#registry.call(userId, caller, envId, "files_pull", { ...args, offset: got });
+      if (out.status !== "answered") return { ok: false, code: "failed", message: "the device stopped answering in the middle of the file" };
+      if (!out.answer.ok) return out.answer;
+      const next = part(out.answer.result);
+      const bytes = Buffer.from(typeof next.data === "string" ? next.data : "", "base64");
+      if (!bytes.length || next.size !== head.size) return { ok: false, code: "failed", message: "the file changed while it was being copied" };
+      parts.push(bytes);
+      got += bytes.length;
+    }
+    return { ok: true, result: { name: head.name, data: Buffer.concat(parts).toString("base64") } };
   }
 
   /** A workspace folder the agent named (or the default one), always inside the workspace. */

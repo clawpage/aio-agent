@@ -3943,6 +3943,9 @@ button.clawpage-version-restore.danger { background:var(--error); border-color:v
 .iphone-abilities { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
 .iphone-abilities li { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .iphone-abilities li button { margin-top: 2px; }
+.iphone-abilities .android-photos { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; max-height: 260px; overflow-y: auto; }
+.iphone-abilities .android-photos li { flex-direction: column; align-items: center; gap: 2px; }
+.iphone-abilities .android-photos img, .android-photo-blank { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; background: var(--bg-soft); display: block; }
 .debug-actions {
   justify-content: flex-end;
 }
