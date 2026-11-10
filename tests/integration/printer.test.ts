@@ -98,9 +98,9 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     const printed = await call("print_file", { path: file, pages: "1-2, 4", copies: 2, sides: "two-sided-long-edge", color: false });
     expect(printed.isError).toBeUndefined();
     expect(printed.content[0]!.text).toContain("3 pages × 2 copies");
-    expect(printed.content[0]!.text).toContain("on Letter.");
+    expect(printed.content[0]!.text).toContain("on Letter, normal quality.");
     expect(printed.content[0]!.text).toContain("Job 17");
-    expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4], borderless: false } }]);
+    expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4], borderless: false, dpi: 300 } }]);
     const job = seen.find((s) => s.op === 0x0002)!;
     expect(job.attrs).toMatchObject({
       "requesting-user-name": ["owner"],
@@ -109,6 +109,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
       copies: [2],
       sides: ["two-sided-long-edge"],
       "print-color-mode": ["monochrome"],
+      "print-quality": [4],
     });
     // No paper named: plain paper, though the photo paper is listed first; the job names its size, tray and type.
     expect(job.attrs.media).toBeUndefined();
@@ -119,16 +120,18 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     asked.length = 0;
     seen.length = 0;
     const photo = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4 × 6" });
-    expect(photo.content[0]!.text).toContain("on 4x6.");
-    expect(asked[0]!.opts).toMatchObject({ media: "na_index-4x6_4x6in", width: 1200, height: 1800, borderless: false });
+    // Photo paper gets the printer's finest mode and pages drawn at 600 dpi, unless told otherwise.
+    expect(photo.content[0]!.text).toContain("on 4x6, high quality.");
+    expect(asked[0]!.opts).toMatchObject({ media: "na_index-4x6_4x6in", width: 2400, height: 3600, dpi: 600, borderless: false });
+    expect(seen.find((s) => s.op === 0x0002)!.attrs["print-quality"]).toEqual([5]);
     expect(seen.find((s) => s.op === 0x0002)!.collections["media-col"]).toEqual([{ "media-size": { "x-dimension": 10160, "y-dimension": 15240 }, "media-source": "main", "media-type": "photographic-high-gloss" }]);
 
     // Borderless: the pages cover the sheet and the job asks for no margins; refused where the printer offers none.
     asked.length = 0;
     seen.length = 0;
-    const edge = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4x6", borderless: true });
-    expect(edge.content[0]!.text).toContain("on 4x6, borderless.");
-    expect(asked[0]!.opts).toMatchObject({ width: 1200, height: 1800, borderless: true });
+    const edge = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4x6", borderless: true, quality: "normal" });
+    expect(edge.content[0]!.text).toContain("on 4x6, borderless, normal quality.");
+    expect(asked[0]!.opts).toMatchObject({ width: 1200, height: 1800, dpi: 300, borderless: true });
     expect(seen.find((s) => s.op === 0x0002)!.collections["media-col"]).toEqual([
       { "media-size": { "x-dimension": 10160, "y-dimension": 15240 }, "media-source": "main", "media-type": "photographic-high-gloss", "media-top-margin": 0, "media-bottom-margin": 0, "media-left-margin": 0, "media-right-margin": 0 },
     ]);
@@ -142,6 +145,13 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     expect(asked).toEqual([]);
     expect(seen.some((s) => s.op === 0x0002)).toBe(false);
     trays = before;
+
+    // High quality on a large sheet asks for the finest mode but keeps the pages at 300 dpi.
+    asked.length = 0;
+    seen.length = 0;
+    await call("print_file", { path: file, quality: "high" });
+    expect(asked[0]!.opts).toMatchObject({ width: 2550, height: 3300, dpi: 300 });
+    expect(seen.find((s) => s.op === 0x0002)!.attrs["print-quality"]).toEqual([5]);
 
     // A paper that is not loaded is refused with what is; so is a document when only photo paper is loaded.
     asked.length = 0;
@@ -170,6 +180,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
       [{ path: "/etc/passwd.pdf" }, "path:"],
       [{ path: "/home/gem/workspace/a.png", pages: "2" }, "pages applies only to PDFs"],
       [{ path: file, copies: 50 }, "copies"],
+      [{ path: file, quality: "best" }, "quality must be normal / high"],
       [{ path: file, pages: "3-1" }, "pages is not written correctly"],
     ] as const) {
       const refused = await call("print_file", args);
@@ -240,9 +251,10 @@ it.skipIf(!python)("turns a picture into a PWG raster page the printer understan
     };
     expect(corner(out)).toBe(255);
     const edge = path.join(dir, "edge.pwg");
-    const borderless = spawnSync("python3", ["-", png, edge, "sgray", "one-sided", "1200", "1800", "na_index-4x6_4x6in", "", "borderless"], { input: script });
+    const borderless = spawnSync("python3", ["-", png, edge, "sgray", "one-sided", "2400", "3600", "na_index-4x6_4x6in", "", "borderless", "600"], { input: script });
     expect(JSON.parse(borderless.stdout.toString().trim())).toEqual({ ok: true, pages: 1 });
-    expect(fs.readFileSync(edge).readUInt32BE(4 + 372)).toBe(1200);
+    const fine = fs.readFileSync(edge);
+    expect([fine.readUInt32BE(4 + 276), fine.readUInt32BE(4 + 352), fine.readUInt32BE(4 + 372)]).toEqual([600, 288, 2400]); // dpi, width in points and in pixels
     expect(corner(edge)).toBeLessThan(255);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

@@ -2,8 +2,8 @@
 
 Runs inside the account's sandbox (python3 -), with fixed argv from the control
 plane: source, output, color space (srgb|sgray), sides, page width/height in
-pixels at 300 dpi, the PWG media name, the PDF pages to print ("" = all), and
-"borderless" when the sheet is printed to its edges.
+pixels, the PWG media name, the PDF pages to print ("" = all), "borderless"
+when the sheet is printed to its edges, and the resolution (300 or 600 dpi).
 Prints one JSON line: {"ok": true, "pages": n} or {"ok": false, "message": ...}.
 
 PWG raster (PWG 5102.4): "RaS2", then per page a 1796-byte big-endian header and
@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 
-DPI = 300
+DPI = 600 if sys.argv[10:11] == ["600"] else 300
 MAX_PAGES = 50
 IMAGE_MARGIN = DPI // 4  # pictures keep a quarter inch clear of the edge
 
@@ -64,13 +64,26 @@ def rendered(src, pages, gray, tmp):
         os.unlink(path)
 
 
+def to_srgb(im):
+    """A picture in another colour space (a phone's Display P3) as sRGB, which is what the printer is told it gets."""
+    profile = im.info.get("icc_profile")
+    if not profile or im.mode not in ("RGB", "RGBA"):
+        return im
+    try:
+        import io
+        from PIL import ImageCms
+        return ImageCms.profileToProfile(im, ImageCms.ImageCmsProfile(io.BytesIO(profile)), ImageCms.createProfile("sRGB"), outputMode=im.mode)
+    except Exception:  # noqa: BLE001 - an unreadable profile leaves the picture as it is
+        return im
+
+
 def picture(src):
     try:
         im = Image.open(src)
         im.load()
     except Exception as err:  # noqa: BLE001 - any decoding failure is the same answer
         done(ok=False, message=f"Cannot open this image: {err}")
-    im = ImageOps.exif_transpose(im)
+    im = to_srgb(ImageOps.exif_transpose(im))
     if im.mode in ("RGBA", "LA", "P"):
         im = im.convert("RGBA")
         white = Image.new("RGBA", im.size, (255, 255, 255, 255))

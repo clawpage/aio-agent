@@ -25,6 +25,11 @@ const SIDES = ["one-sided", "two-sided-long-edge", "two-sided-short-edge"] as co
 type Sides = (typeof SIDES)[number];
 
 const DPI = 300;
+/** High quality draws sheets up to 5x7 at 600 dpi; larger ones stay at 300 so a page still converts and sends in time. */
+const FINE_DPI = 600;
+const FINE_MAX_WIDTH = 12700;
+const QUALITIES = { normal: 4, high: 5 } as const;
+type Quality = keyof typeof QUALITIES;
 /** Paper sizes people name, with their PWG media name and size in hundredths of a millimetre. */
 const SIZES: Array<{ media: string; label: string; x: number; y: number }> = [
   { media: "na_letter_8.5x11in", label: "Letter", x: 21590, y: 27940 },
@@ -52,7 +57,8 @@ interface Paper {
 
 const MARGINS = ["media-top-margin", "media-bottom-margin", "media-left-margin", "media-right-margin"] as const;
 
-const pixels = (hundredthsMm: number) => Math.round((hundredthsMm / 2540) * DPI);
+const pixels = (hundredthsMm: number, dpi: number) => Math.round((hundredthsMm / 2540) * dpi);
+const isPhoto = (p: Paper) => !!p.type?.startsWith("photographic");
 const isPlain = (p: Paper) => !p.type || p.type.startsWith("stationery");
 const kindOf = (type: string) => (type.startsWith("stationery") ? "plain paper" : type.startsWith("photographic") ? "photo paper" : type);
 const describe = (p: Paper) => `${p.label}${p.type ? ` (${[kindOf(p.type), p.source ? `${p.source} tray` : "", p.borderless ? "borderless available" : ""].filter(Boolean).join(", ")})` : ""}`;
@@ -147,6 +153,7 @@ const TOOLS = [
         sides: { type: "string", enum: SIDES, description: "One- or two-sided: one-sided (default); two-sided-long-edge flips on the long edge (ordinary portrait documents); two-sided-short-edge flips on the short edge" },
         color: { type: "boolean", description: "false prints in black and white (saves color ink); color by default" },
         paper: { type: "string", description: "The paper to print on, one of the papers printer_status lists as loaded, e.g. \"Letter\", \"A4\", \"4x6\". Omit for plain document paper; photo paper is used only when named here" },
+        quality: { type: "string", enum: Object.keys(QUALITIES), description: "Print quality: high is the printer's finest mode (slower, more ink), for photos; normal for documents. Default: high on photo paper, normal otherwise" },
         borderless: { type: "boolean", description: "true prints to the very edge of the paper with no white border, on a paper printer_status lists as \"borderless available\": an image is enlarged to cover the whole sheet (its overhang is cropped), a PDF page keeps its size. Default false: a white margin all around" },
       },
       required: ["path"],
@@ -167,12 +174,12 @@ export function printerMcpServers(cfg: Config): Record<string, unknown> {
 export const PRINTER_POLICY =
   "The home printer is connected (aio_printer): when the user wants a file, photo, web page, or a document you made printed, print it directly with print_file; do not make the user print it themselves. " +
   "It only accepts PDFs and images in the workspace: convert Word, Excel, PPT, text, and so on to PDF in the sandbox first (e.g. soffice --headless --convert-to pdf), save web pages as PDF first, then print the converted file. " +
-  "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, color or black and white, and paper, and if they did not say, use 1 copy, one-sided, color, on plain paper. The printer can hold several papers at once (e.g. Letter plain paper and 4x6 photo paper): printer_status lists them; pass paper to print_file when the user names a size or wants a photo print on photo paper, and when it is unclear which paper they mean, ask. Pass borderless only when the user asks for a borderless (edge-to-edge, no white border) print. Confirm with the user first for more than 20 pages or multiple copies. " +
+  "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, color or black and white, and paper, and if they did not say, use 1 copy, one-sided, color, on plain paper. The printer can hold several papers at once (e.g. Letter plain paper and 4x6 photo paper): printer_status lists them; pass paper to print_file when the user names a size or wants a photo print on photo paper, and when it is unclear which paper they mean, ask. Photo paper prints at high quality on its own; pass quality only when the user asks for finer or faster printing than that default. Pass borderless only when the user asks for a borderless (edge-to-edge, no white border) print. Confirm with the user first for more than 20 pages or multiple copies. " +
   "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer.";
 
 /** Turning one account's workspace file into printer pages. */
 export interface PrintFiles {
-  rasterize(file: string, opts: { color: boolean; sides: Sides; media: string; width: number; height: number; pages: number[]; borderless: boolean }): Promise<{ bytes: Buffer; pages: number }>;
+  rasterize(file: string, opts: { color: boolean; sides: Sides; media: string; width: number; height: number; pages: number[]; borderless: boolean; dpi: number }): Promise<{ bytes: Buffer; pages: number }>;
 }
 
 class PrintError extends Error {}
@@ -191,7 +198,7 @@ export function sandboxPrintFiles(ctx: Pick<AppContext, "documents" | "container
       const out = `/tmp/aio-print-${randomUUID()}.pwg`;
       try {
         const run = await ctx.container.execInSandbox(
-          ["python3", "-", stat.realPath, out, opts.color ? "srgb" : "sgray", opts.sides, String(opts.width), String(opts.height), opts.media, opts.pages.join(","), opts.borderless ? "borderless" : "margins"],
+          ["python3", "-", stat.realPath, out, opts.color ? "srgb" : "sgray", opts.sides, String(opts.width), String(opts.height), opts.media, opts.pages.join(","), opts.borderless ? "borderless" : "margins", String(opts.dpi)],
           { stdin: script, timeoutMs: 240_000 },
         );
         const last = run.stdout.trim().split("\n").pop() ?? "";
@@ -395,6 +402,7 @@ export class PrinterGateway {
     const color = args.color !== false;
     const wanted = typeof args.paper === "string" ? args.paper.trim() : "";
     const borderless = args.borderless === true;
+    if (args.quality !== undefined && !Object.hasOwn(QUALITIES, String(args.quality))) throw new PrintError(`quality must be ${Object.keys(QUALITIES).join(" / ")}`);
 
     const job = this.#queue.then(async () => {
       const printer = await this.#printer();
@@ -403,20 +411,22 @@ export class PrinterGateway {
       const paper = choosePaper(loadedPapers(printer), wanted);
       const { media } = paper;
       if (borderless && !paper.borderless) throw new PrintError(`The printer does not offer borderless printing on ${describe(paper)}; nothing was printed. Print it with margins, or on a paper listed as borderless available.`);
-      const [width, height] = [pixels(paper.x), pixels(paper.y)];
+      const quality = (args.quality as Quality | undefined) ?? (isPhoto(paper) ? "high" : "normal");
+      const dpi = quality === "high" && paper.x <= FINE_MAX_WIDTH ? FINE_DPI : DPI;
+      const [width, height] = [pixels(paper.x, dpi), pixels(paper.y, dpi)];
       // Size, tray and paper type together when the printer told us them, so it cannot feed from another tray.
       const mediaAttr: Parameters<typeof encodeRequest>[4] = paper.source
         ? [[TAG.begCollection, "media-col", { "media-size": { "x-dimension": paper.x, "y-dimension": paper.y }, "media-source": paper.source, ...(paper.type ? { "media-type": paper.type } : {}), ...(borderless ? Object.fromEntries(MARGINS.map((m) => [m, 0])) : {}) }]]
         : [[TAG.keyword, "media", media]];
       const files = await this.#filesFor(account.userId);
-      const raster = await files.rasterize(file, { color, sides, media, width, height, pages, borderless });
+      const raster = await files.rasterize(file, { color, sides, media, width, height, pages, borderless, dpi });
       const started = Date.now();
       let res: IppResponse;
       try {
         res = await this.#ipp(
           OP.printJob,
           [[TAG.name, "requesting-user-name", account.username], [TAG.name, "job-name", path.posix.basename(file).slice(0, 200)], [TAG.mime, "document-format", "image/pwg-raster"]],
-          [[TAG.integer, "copies", copies], [TAG.keyword, "sides", sides], [TAG.keyword, "print-color-mode", color ? "color" : "monochrome"], ...mediaAttr],
+          [[TAG.integer, "copies", copies], [TAG.keyword, "sides", sides], [TAG.keyword, "print-color-mode", color ? "color" : "monochrome"], [TAG.enum, "print-quality", QUALITIES[quality]], ...mediaAttr],
           raster.bytes,
           180_000,
         );
@@ -428,10 +438,10 @@ export class PrinterGateway {
       if (res.status >= 0x0100) throw new PrintError(`The printer refused this job (IPP status 0x${res.status.toString(16)}${res.attrs["status-message"] ? `: ${res.attrs["status-message"][0]}` : ""}); nothing was printed`);
       const jobId = res.attrs["job-id"]?.[0];
       const state = JOB_STATES[Number(res.attrs["job-state"]?.[0])] ?? "received";
-      this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, paper: describe(paper), borderless, bytes: raster.bytes.length, ms: Date.now() - started });
+      this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, paper: describe(paper), borderless, quality, dpi, bytes: raster.bytes.length, ms: Date.now() - started });
       const warn = problems(a);
       return [
-        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, on ${paper.label}${borderless ? ", borderless" : ""}.`,
+        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, on ${paper.label}${borderless ? ", borderless" : ""}, ${quality} quality.`,
         `Job ${jobId ?? "unknown"}, status: ${state}.`,
         warn.length ? `Printer notes: ${warn.join(", ")}` : "",
       ].filter(Boolean).join("\n");
