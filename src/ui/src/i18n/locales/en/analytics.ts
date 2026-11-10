@@ -9,7 +9,7 @@ export const analytics: typeof zh = {
   range: "Time range",
   lastDays: (n: number) => `Last ${n} days`,
   stale: (error: string) => `${error} · Data may be out of date`,
-  meta: (timezone: string, updated: string) => `${timezone} · Updated ${updated} · Refreshes every minute`,
+  updated: (time: string) => `Updated ${time}`,
   olderControl: "The control plane is older than this dashboard, so only the basic figures show. The funnel, retention, feature use, task quality and accounts appear once it is updated.",
   vsPrevious: (n: number) => `Compared with the ${n} days before`,
   deltaNew: "New",
@@ -23,7 +23,7 @@ export const analytics: typeof zh = {
     activation: "Activation funnel",
     retention: "New account retention",
     features: "Feature use",
-    platforms: "Platforms and versions",
+    platforms: "Platforms",
     quality: "Task quality",
     boot: "Opening speed",
     accounts: "Accounts and usage",
@@ -45,8 +45,7 @@ export const analytics: typeof zh = {
     sessions: "Sessions",
     sessionsSub: (perAccount: string, days: string) => `${perAccount} per account · ${days} active days each`,
     tokens: "Tokens",
-    cost: "Est. cost",
-    costSub: "At API list prices",
+    cost: (cost: string) => `Est. cost ${cost}`,
     tokensSub: (input: string, output: string) => `Input ${input} · output ${output}`,
   },
   activeList: {
@@ -108,11 +107,6 @@ export const analytics: typeof zh = {
     taps: (count: string, users: string) => `${count} uses · ${users} account${users === "1" ? "" : "s"}`,
     note: "Accounts are compared with the period before. The executor's tool use (knowledge base, images, publishing) is counted for the task's account but not as activity; each knowledge base tool counts at most once every 10 minutes. Clawpage visits are counted for the page's owner.",
   },
-  platforms: {
-    versions: "Console versions in use",
-    version: (platform: string, version: string, users: string) => `${platform} ${version} · ${users} account${users === "1" ? "" : "s"}`,
-    noVersions: "No version data yet (reported by the updated console when it opens).",
-  },
   quality: {
     outcomes: { completed: "Completed", other: "In progress and other", interrupted: "Interrupted", failed: "Failed or unknown" },
     share: (label: string, n: string, pct: string) => `${label} ${n} (${pct})`,
@@ -147,7 +141,7 @@ export const analytics: typeof zh = {
     browser_restore_failed: "Browser restores failed", shared_kb_create: "Shared knowledge bases created", shared_kb_invite: "Shared knowledge base invitations", shared_kb_join: "Shared knowledge bases joined",
   },
   boot: {
-    columns: { platform: "Platform", opens: "Opens", cached: "From cache", ttfb: "First byte", dom: "Page ready", version: "Version", session: "Session", feed: "Feed", cover: "Cover lifted" },
+    columns: { platform: "Platform", opens: "Opens", cached: "From cache", ttfb: "First byte", dom: "Page ready", session: "Session", feed: "Feed", cover: "Cover lifted" },
     note: "Recorded at every opening of the console; each step in milliseconds from the start of the opening (median / P90). \"From cache\" counts openings the service worker served from the saved page without waiting on the network. The loading mark lifts only after finishing its drawing.",
     empty: "No openings recorded in this period yet.",
   },

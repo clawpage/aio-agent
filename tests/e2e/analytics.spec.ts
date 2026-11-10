@@ -99,14 +99,17 @@ test('the owner reads the redesigned dashboard: overview with changes, trends, f
   // 30 days × (100 + 10 + 2,000,000 + 10) tokens, short with the exact figure on hover.
   await expect(tile('token')).toContainText('6000.4万'); await expect(kpis.locator('[title="60,003,600"]')).toBeVisible();
   // The cost at list prices adds up the priced accounts; the table shows each one's, and a member's share of today's tokens.
-  await expect(tile('估算费用')).toContainText('US$120');
+  await expect(tile('token')).toContainText('估算费用 US$120');
   // One table for accounts and their tokens: no separate token table next to it.
   await expect(page.locator('.dash-tokens')).toHaveCount(0);
   const yzmy = page.locator('.dash-accounts tbody tr').filter({ hasText: /^yzmy/ });
   await expect(yzmy).toContainText('US$120'); await expect(yzmy).toContainText('37%');
   const owner = page.locator('.dash-accounts tbody tr').filter({ hasText: /^owner/ });
-  // Columns after the account: last seen … completion, tokens, input, cached, output, cost, quota, platforms, model.
-  await expect(owner).toContainText('未定价'); await expect(owner.locator('td').nth(10)).toHaveText('—');
+  // Columns after the account: last seen … completion, tokens, cost, quota, platforms, model.
+  await expect(owner).toContainText('未定价'); await expect(owner.locator('td').nth(7)).toHaveText('—');
+  // Nothing says which build of the console people run, nor the dashboard's own timezone and refresh rhythm.
+  await expect(page.locator('.usage-body')).not.toContainText('0.1.0'); await expect(page.locator('.dash-updated')).toHaveText('更新于 14:00');
+  await expect(kpis.locator('.dash-kpi')).toHaveCount(8);
 
   // The four daily charts are drawn on canvas by the shared ECharts renderer.
   const charts = page.locator('.dash-chart');
@@ -134,7 +137,6 @@ test('the owner reads the redesigned dashboard: overview with changes, trends, f
   await expect(features.first()).toContainText('手动提交任务'); await expect(features.first()).toContainText('8'); await expect(features.first()).toContainText('占活跃 89% · 30 次 · ▲ 33%');
   await expect(page.locator('.dash-unused')).toContainText('本期未使用'); await expect(page.locator('.dash-unused')).toContainText('开启通知');
   await expect(page.locator('.dash-chips').first()).toContainText('Clawpages 小程序'); await expect(page.locator('.dash-chips').first()).toContainText('帮我盯价格');
-  await expect(page.getByText('iOS App 0.1.0 · 3 个账号')).toBeVisible();
   // Quality: the outcome split and the signals.
   await expect(page.locator('section[aria-labelledby="dash-quality"]')).toContainText('完成 30（75%）');
   await expect(page.locator('.dash-stats')).toContainText('42分钟');

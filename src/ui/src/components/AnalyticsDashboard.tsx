@@ -56,8 +56,8 @@ const rate = (p: PeriodTotals | undefined) => p && p.tasks ? p.completed / p.tas
 function Kpi({ label, value, sub, change, days, onClick, buttonRef, more }: { label: string; value: ReactNode; sub?: ReactNode; change?: Change; days: number; onClick?: () => void; buttonRef?: Ref<HTMLButtonElement>; more?: string }) {
   const body = <>
     <span className="dash-kpi-label">{label}</span>
-    <strong className="dash-kpi-value">{value}</strong>
-    {change && <span className={`dash-delta ${change.tone}`} title={a().vsPrevious(days)} aria-label={`${change.label} · ${a().vsPrevious(days)}`}>{change.text}</span>}
+    <span className="dash-kpi-figure"><strong className="dash-kpi-value">{value}</strong>
+      {change && <span className={`dash-delta ${change.tone}`} title={a().vsPrevious(days)} aria-label={`${change.label} · ${a().vsPrevious(days)}`}>{change.text}</span>}</span>
     {sub && <span className="dash-kpi-sub">{sub}</span>}
     {more && <span className="dash-kpi-more">{more}</span>}
   </>;
@@ -129,7 +129,6 @@ function Funnel({ steps }: { steps: FunnelEntry[] }) {
         {note && <span className="muted tiny">{note}</span>}
       </li>;
     })}</ol>
-    <p className="dash-note muted tiny">{f.note}</p>
   </>;
 }
 
@@ -175,24 +174,18 @@ function Features({ report }: { report: AnalyticsReport }) {
       <h3>{f.welcome}</h3>
       <ul className="dash-chips">{report.welcomeCards.map(w => <li key={w.card}><span>{cardName(w.card)}</span><span className="muted tiny">{f.taps(fmt(w.count), fmt(w.users))}</span></li>)}</ul>
     </div>}
-    <p className="dash-note muted tiny">{f.note}</p>
   </>;
 }
 
 function Platforms({ report }: { report: AnalyticsReport }) {
-  const p = a().platforms;
   const names = a().platformNames;
   const rows = [...report.platforms].sort((x, y) => y.users - x.users || y.events - x.events);
   const max = Math.max(1, ...rows.map(x => x.users));
-  return <>
-    {rows.length === 0 ? <p className="muted">{a().noEvents}</p> : <ul className="dash-bars">{rows.map(x => <li key={x.platform}>
-      <div className="dash-row-head"><span>{names[x.platform] ?? x.platform}</span><span className="dash-row-figures"><strong>{fmt(x.users)}</strong><span className="muted tiny">{a().eventColumns.count} {fmt(x.events)}</span></span></div>
-      <Bar value={x.users} max={max}/>
-    </li>)}</ul>}
-    <div className="dash-sub"><h3>{p.versions}</h3>
-      {report.versions?.length ? <ul className="dash-chips">{report.versions.map(v => <li key={`${v.platform}-${v.version}`}><span>{p.version(names[v.platform] ?? v.platform, v.version, fmt(v.users))}</span></li>)}</ul>
-        : <p className="muted tiny">{p.noVersions}</p>}</div>
-  </>;
+  if (rows.length === 0) return <p className="muted">{a().noEvents}</p>;
+  return <ul className="dash-bars">{rows.map(x => <li key={x.platform}>
+    <div className="dash-row-head"><span>{names[x.platform] ?? x.platform}</span><strong>{fmt(x.users)}</strong></div>
+    <Bar value={x.users} max={max}/>
+  </li>)}</ul>;
 }
 
 function Quality({ quality }: { quality: NonNullable<AnalyticsReport['quality']> }) {
@@ -217,16 +210,18 @@ function Quality({ quality }: { quality: NonNullable<AnalyticsReport['quality']>
       <div><dt>{q.interrupted}</dt><dd>{pct(o.interrupted, total)}</dd></div>
       <div><dt>{q.median}</dt><dd>{duration(quality.medianMs)}</dd></div>
       <div><dt>{q.p90}</dt><dd>{duration(quality.p90Ms)}</dd></div>
+    </dl>
+    <dl className="dash-signals">
       <div><dt>{q.signals.stops}</dt><dd>{fmt(quality.stops)}</dd></div>
       <div><dt>{q.signals.retries}</dt><dd>{fmt(quality.retries)}</dd></div>
-      <div><dt>{q.signals.reports}</dt><dd>{fmt(quality.reports)}</dd></div>
       <div><dt>{q.signals.likes}</dt><dd>{fmt(quality.likes ?? 0)}</dd></div>
       <div><dt>{q.signals.dislikes}</dt><dd>{fmt(quality.dislikes ?? 0)}</dd></div>
-      <div><dt>{q.signals.restoreFailures}</dt><dd>{fmt(quality.restoreFailures)}
-        {/* Whose browser, and at what step: enough to tell one account's stuck page from a fault everyone hits. */}
-        {quality.restoreAccounts?.length ? <small className="dash-restore-detail">{quality.restoreAccounts.map(x => `${x.username} ${fmt(x.count)}`).join(a().activeList.separator)}<br/>
-          {Object.entries(quality.restoreReasons ?? {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${q.restoreReasons[k] ?? k} ${fmt(n)}`).join(a().activeList.separator)}</small> : null}</dd></div>
+      <div><dt>{q.signals.reports}</dt><dd>{fmt(quality.reports)}</dd></div>
+      <div><dt>{q.signals.restoreFailures}</dt><dd>{fmt(quality.restoreFailures)}</dd></div>
     </dl>
+    {/* Whose browser, and at what step: enough to tell one account's stuck page from a fault everyone hits. */}
+    {quality.restoreAccounts?.length ? <p className="dash-restore-detail muted tiny">{q.signals.restoreFailures}: {quality.restoreAccounts.map(x => `${x.username} ${fmt(x.count)}`).join(a().activeList.separator)}
+      {' · '}{Object.entries(quality.restoreReasons ?? {}).sort((x, y) => y[1] - x[1]).map(([k, n]) => `${q.restoreReasons[k] ?? k} ${fmt(n)}`).join(a().activeList.separator)}</p> : null}
   </>;
 }
 
@@ -235,14 +230,14 @@ type SortKey = 'account' | 'lastSeen' | 'activeDays' | 'sessions' | 'tasks' | 'c
 function Boot({ rows }: { rows: BootPlatform[] }) {
   const b = a().boot;
   const sec = (ms: number | null) => (ms === null ? "—" : (ms / 1000).toFixed(1));
+  const steps = BOOT_METRICS.filter((m): m is Exclude<typeof m, 'version'> => m !== 'version');
   if (!rows.length) return <p className="muted">{b.empty}</p>;
   return <>
     <div className="dash-table-scroll"><table className="dash-table dash-boot">
-      <thead><tr><th scope="col">{b.columns.platform}</th><th scope="col">{b.columns.opens}</th><th scope="col">{b.columns.cached}</th>{BOOT_METRICS.map(m => <th scope="col" key={m}>{b.columns[m]}</th>)}</tr></thead>
+      <thead><tr><th scope="col">{b.columns.platform}</th><th scope="col">{b.columns.opens}</th><th scope="col">{b.columns.cached}</th>{steps.map(m => <th scope="col" key={m}>{b.columns[m]}</th>)}</tr></thead>
       <tbody>{rows.map(r => <tr key={r.platform}><th scope="row">{a().platformNames[r.platform] ?? r.platform}</th><td>{fmt(r.opens)}</td><td>{pct(r.cached, r.opens)}</td>
-        {BOOT_METRICS.map(m => <td key={m}>{sec(r.times[m].p50)} / {sec(r.times[m].p90)}</td>)}</tr>)}</tbody>
+        {steps.map(m => <td key={m}>{sec(r.times[m].p50)} / {sec(r.times[m].p90)}</td>)}</tr>)}</tbody>
     </table></div>
-    <p className="dash-note muted tiny">{b.note}</p>
   </>;
 }
 
@@ -281,7 +276,7 @@ function Accounts({ rows, usage, now, total }: { rows: AccountRow[]; usage: Map<
       <span className="muted tiny">{c.count(fmt(shown.length), fmt(total))}</span>
     </div>
     <div className="dash-table-scroll"><table className="dash-table dash-accounts">
-      <thead><tr>{head('account')}{head('lastSeen')}{head('activeDays')}{head('sessions', true)}{head('tasks')}{head('completion')}{usage && <>{head('tokens')}<th scope="col" className="dash-wide">{t.usage.columns.input}</th><th scope="col" className="dash-wide">{t.usage.columns.cached}</th><th scope="col" className="dash-wide">{t.usage.columns.output}</th>{head('cost')}<th scope="col">{t.usage.columns.quota}</th></>}<th scope="col" className="dash-wide dash-text">{c.columns.platforms}</th><th scope="col" className="dash-wide dash-text">{c.columns.model}</th></tr></thead>
+      <thead><tr>{head('account')}{head('lastSeen')}{head('activeDays')}{head('sessions', true)}{head('tasks')}{head('completion')}{usage && <>{head('tokens')}{head('cost')}<th scope="col">{t.usage.columns.quota}</th></>}<th scope="col" className="dash-wide dash-text">{c.columns.platforms}</th><th scope="col" className="dash-wide dash-text">{c.columns.model}</th></tr></thead>
       <tbody>{shown.map(r => <tr key={r.id}>
         <th scope="row">{r.username}<small>{r.role === 'owner' ? t.usage.roles.owner : t.usage.roles.member}</small></th>
         <td>{r.lastSeenAt ? <time dateTime={new Date(r.lastSeenAt).toISOString()} title={new Date(r.lastSeenAt).toLocaleString(locale)}>{ago(r.lastSeenAt, now)}</time> : <span className="muted">{c.never}</span>}</td>
@@ -300,10 +295,9 @@ function Accounts({ rows, usage, now, total }: { rows: AccountRow[]; usage: Map<
 
 /** An account's token columns; a dash where its ledger could not be read or it has none. */
 function UsageCells({ x }: { x: AccountUsage | undefined }) {
-  if (!x?.available) return <><td>—</td><td className="dash-wide">—</td><td className="dash-wide">—</td><td className="dash-wide">—</td><td>—</td><td>—</td></>;
-  const n = (v: number) => <span title={fmt(v)}>{short(v)}</span>;
+  if (!x?.available) return <><td>—</td><td>—</td><td>—</td></>;
   return <>
-    <td>{n(x.totals.total)}</td><td className="dash-wide">{n(x.totals.input)}</td><td className="dash-wide">{n(x.totals.cached)}</td><td className="dash-wide">{n(x.totals.output)}</td>
+    <td><span title={`${fmt(x.totals.total)} · ${t.usage.columns.input} ${fmt(x.totals.input)} · ${t.usage.columns.cached} ${fmt(x.totals.cached)} · ${t.usage.columns.output} ${fmt(x.totals.output)}`}>{short(x.totals.total)}</span></td>
     <td>{x.totals.usd == null ? <span className="muted" title={x.model ?? undefined}>{t.usage.columns.noPrice}</span> : <span title={x.model ?? undefined}>{usd(x.totals.usd)}</span>}</td>
     <td>{x.quota ? <span title={`${fmt(x.quota.used)} / ${fmt(x.quota.limit)}`}>{pct(x.quota.used, x.quota.limit)}</span> : '—'}</td>
   </>;
@@ -403,7 +397,7 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
     <div className="usage-body dash-body">
       <div className="dash-toolbar">
         <div className="dash-range" role="radiogroup" aria-label={a().range}>{RANGES.map(n => <button key={n} type="button" role="radio" aria-checked={days === n} className={days === n ? 'on' : undefined} onClick={() => setDays(n)}>{a().lastDays(n)}</button>)}</div>
-        {tz && <span className="muted tiny">{a().meta(tz, new Date(generated).toLocaleTimeString(locale))}</span>}
+        {tz && <span className="dash-updated muted tiny">{a().updated(new Date(generated).toLocaleTimeString(locale, { timeZone: tz, hour: '2-digit', minute: '2-digit' }))}</span>}
       </div>
       {errors.product && <p className="banner error" role="alert">{a().stale(errors.product)}</p>}
       {errors.usage && <p className="banner error" role="alert">{a().stale(errors.usage)}</p>}
@@ -426,8 +420,8 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
             <Kpi days={p.days} label={a().kpi.tasks} value={fmt(p.totals.tasks)} sub={a().kpi.tasksSub(fmt(p.totals.sources.manual), fmt(p.totals.sources.schedule), fmt(p.totals.sources.gadget))}/>
             <Kpi days={p.days} label={a().kpi.completion} value={pct(p.totals.completed, p.totals.tasks)}/>
           </>}
-          {u && <Kpi days={u.days} label={a().kpi.tokens} value={<span title={fmt(tokenTotal)}>{short(tokenTotal)}</span>} sub={a().kpi.tokensSub(short(valid.reduce((n, x) => n + x.totals.input, 0)), short(valid.reduce((n, x) => n + x.totals.output, 0)))}/>}
-          {u && valid.some(x => x.totals.usd !== undefined) && <Kpi days={u.days} label={a().kpi.cost} value={usd(costTotal)} sub={a().kpi.costSub}/>}
+          {u && <Kpi days={u.days} label={a().kpi.tokens} value={<span title={fmt(tokenTotal)}>{short(tokenTotal)}</span>}
+            sub={<>{valid.some(x => x.totals.usd !== undefined) && <span className="dash-kpi-cost">{a().kpi.cost(usd(costTotal))}</span>}{a().kpi.tokensSub(short(valid.reduce((n, x) => n + x.totals.input, 0)), short(valid.reduce((n, x) => n + x.totals.output, 0)))}</>}/>}
         </div></section>
 
         {(charts || tokenChart) && <Section id="dash-trends" title={a().sections.trends} className="dash-wide-card"><div className="dash-charts">
@@ -441,15 +435,15 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
 
         {p?.activation && <div className="dash-grid">
           <Section id="dash-activation" title={a().sections.activation}><Funnel steps={p.activation}/></Section>
-          <Section id="dash-retention" title={a().sections.retention}><Retention cohorts={p.cohorts ?? []}/></Section>
+          <div className="dash-column">
+            <Section id="dash-retention" title={a().sections.retention}><Retention cohorts={p.cohorts ?? []}/></Section>
+            {p.features && <Section id="dash-platforms" title={a().sections.platforms}><Platforms report={p}/></Section>}
+          </div>
         </div>}
+
+        {p?.quality && <Section id="dash-quality" title={a().sections.quality} className="dash-wide-card"><Quality quality={p.quality}/></Section>}
 
         {p?.features && <Section id="dash-features" title={a().sections.features} className="dash-wide-card"><Features report={p}/></Section>}
-
-        {p?.features && <div className="dash-grid">
-          <Section id="dash-platforms" title={a().sections.platforms}><Platforms report={p}/></Section>
-          {p.quality && <Section id="dash-quality" title={a().sections.quality}><Quality quality={p.quality}/></Section>}
-        </div>}
 
         {p?.boot && <Section id="dash-boot" title={a().sections.boot} className="dash-wide-card"><Boot rows={p.boot}/></Section>}
 
@@ -473,24 +467,29 @@ export function AnalyticsDashboard({ onExpired }: { onExpired: () => void }) {
           </table></div>}
         </Section>}
 
-        {p && <details className="dash-card dash-wide-card dash-details"><summary>{a().daily}</summary><div className="dash-table-scroll"><table className="dash-table">
+        <div className="dash-card dash-wide-card dash-more">
+          {p && <details className="dash-details"><summary>{a().daily}</summary><div className="dash-table-scroll"><table className="dash-table">
           <thead><tr><th scope="col">{a().columns.date}</th>{(['active', 'signups', 'logins', 'sessions', 'tasks', 'completed', 'failed'] as const).map(k => <th scope="col" key={k}>{a().columns[k]}</th>)}</tr></thead>
           <tbody>{[...p.daily].reverse().map(d => <tr key={d.date}><th scope="row">{d.date}</th>{(['active', 'signups', 'logins', 'sessions', 'tasks', 'completed', 'failed'] as const).map(k => <td key={k}>{d[k] === undefined ? '—' : fmt(d[k]!)}</td>)}</tr>)}</tbody>
         </table></div></details>}
 
-        {p && <details className="dash-card dash-wide-card dash-details"><summary>{a().allEvents}</summary>{p.events.length === 0 ? <p className="muted">{a().noEvents}</p> : <div className="dash-table-scroll"><table className="dash-table">
+          {p && <details className="dash-details"><summary>{a().allEvents}</summary>{p.events.length === 0 ? <p className="muted">{a().noEvents}</p> : <div className="dash-table-scroll"><table className="dash-table">
           <thead><tr><th scope="col">{a().eventColumns.event}</th><th scope="col">{a().eventColumns.count}</th><th scope="col">{a().eventColumns.users}</th></tr></thead>
           <tbody>{p.events.map(e => <tr key={e.name}><th scope="row">{a().events[e.name] ?? e.name}<small>{e.name}</small></th><td>{fmt(e.count)}</td><td>{fmt(e.users)}</td></tr>)}</tbody>
         </table></div>}</details>}
 
-        <details className="dash-card dash-wide-card dash-details"><summary>{a().methodology}</summary>
+          <details className="dash-details"><summary>{a().methodology}</summary>
+          {p?.activation && <p className="dash-note muted tiny">{a().funnel.note}</p>}
+          {p?.features && <p className="dash-note muted tiny">{a().features.note}</p>}
+          {p?.boot && <p className="dash-note muted tiny">{a().boot.note}</p>}
           {p && <p className="dash-note muted tiny">{a().note(p.collectionStartedAt ? new Date(p.collectionStartedAt).toLocaleString(locale, { timeZone: tz }) : null)}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.note}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.historyNote}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.costNote}</p>}
           {u && <p className="dash-note muted tiny">{t.usage.quotaNote}</p>}
           {u && <ul className="usage-coverage muted tiny">{u.accounts.map(x => <li key={x.id}>{t.usage.coverage(x.username, x.collectionStartedAt ? new Date(x.collectionStartedAt).toLocaleString(locale, { timeZone: tz }) : null, x.firstRecordAt ? new Date(x.firstRecordAt).toLocaleDateString(locale, { timeZone: tz }) : null)}</li>)}</ul>}
-        </details>
+          </details>
+        </div>
       </div>}
     </div>
     <PopupPresence onExited={() => activeButton.current?.focus()}>{showActive && p && <ActiveTodayDialog accounts={p.activeTodayAccounts} timezone={p.timezone} onClose={() => setShowActive(false)}/>}</PopupPresence>

@@ -9,7 +9,7 @@ export const analytics: typeof zh = {
   range: "時間範圍",
   lastDays: (n: number) => `近 ${n} 天`,
   stale: (error: string) => `${error} · 資料可能尚未更新`,
-  meta: (timezone: string, updated: string) => `${timezone} · 更新於 ${updated} · 每分鐘重新整理`,
+  updated: (time: string) => `更新於 ${time}`,
   olderControl: "控制面版本較舊：只顯示基本數字。啟用漏斗、留存、功能使用、任務品質與帳號明細會在控制面更新後顯示。",
   vsPrevious: (n: number) => `與前 ${n} 天相比`,
   deltaNew: "新出現",
@@ -23,7 +23,7 @@ export const analytics: typeof zh = {
     activation: "啟用漏斗",
     retention: "新使用者留存",
     features: "功能使用",
-    platforms: "平台與版本",
+    platforms: "平台",
     quality: "任務品質",
     boot: "開啟速度",
     accounts: "帳號與用量",
@@ -45,8 +45,7 @@ export const analytics: typeof zh = {
     sessions: "工作階段",
     sessionsSub: (perAccount: string, days: string) => `人均 ${perAccount} 次 · 人均活躍 ${days} 天`,
     tokens: "token",
-    cost: "估算費用",
-    costSub: "按 API 標價折算",
+    cost: (cost: string) => `估算費用 ${cost}`,
     tokensSub: (input: string, output: string) => `輸入 ${input} · 輸出 ${output}`,
   },
   activeList: {
@@ -108,11 +107,6 @@ export const analytics: typeof zh = {
     taps: (count: string, users: string) => `${count} 次 · ${users} 個帳號`,
     note: "使用帳號與上一期相比；執行器的工具呼叫（知識庫、產生圖片、發布）記在任務所屬帳號名下，不算活躍；知識庫每個工具每 10 分鐘最多記一次；「Clawpage 被造訪」記在頁面主人名下。",
   },
-  platforms: {
-    versions: "使用中的介面版本",
-    version: (platform: string, version: string, users: string) => `${platform} ${version} · ${users} 個帳號`,
-    noVersions: "還沒有版本資料（新版介面開啟後回報）。",
-  },
   quality: {
     outcomes: { completed: "完成", other: "進行中及其他", interrupted: "中斷", failed: "失敗或結果未知" },
     share: (label: string, n: string, pct: string) => `${label} ${n}（${pct}）`,
@@ -147,7 +141,7 @@ export const analytics: typeof zh = {
     browser_restore_failed: "瀏覽器還原失敗", shared_kb_create: "新增共享知識庫", shared_kb_invite: "邀請加入共享知識庫", shared_kb_join: "加入共享知識庫",
   },
   boot: {
-    columns: { platform: "平台", opens: "開啟次數", cached: "從快取開啟", ttfb: "首位元組", dom: "頁面就緒", version: "版本", session: "登入", feed: "對話串", cover: "開屏收起" },
+    columns: { platform: "平台", opens: "開啟次數", cached: "從快取開啟", ttfb: "首位元組", dom: "頁面就緒", session: "登入", feed: "對話串", cover: "開屏收起" },
     note: "每次開啟主控台記一次，各步為從開始開啟起算的毫秒數（中位數 / P90）。「從快取開啟」是 service worker 直接用儲存的頁面、不等網路的次數。開屏收起前會等載入動畫畫完一輪。",
     empty: "這個時間段還沒有記錄到開啟資料。",
   },

@@ -7,7 +7,7 @@ export const analytics = {
   range: "时间范围",
   lastDays: (n: number) => `近 ${n} 天`,
   stale: (error: string) => `${error} · 数据可能尚未更新`,
-  meta: (timezone: string, updated: string) => `${timezone} · 更新于 ${updated} · 每分钟刷新`,
+  updated: (time: string) => `更新于 ${time}`,
   olderControl: "控制面版本较旧：只显示基础数字。激活漏斗、留存、功能使用、任务质量与账号明细在控制面更新后显示。",
   vsPrevious: (n: number) => `与前 ${n} 天相比`,
   deltaNew: "新出现",
@@ -22,7 +22,7 @@ export const analytics = {
     activation: "激活漏斗",
     retention: "新用户留存",
     features: "功能使用",
-    platforms: "平台与版本",
+    platforms: "平台",
     quality: "任务质量",
     boot: "打开速度",
     accounts: "账号与用量",
@@ -44,8 +44,7 @@ export const analytics = {
     sessions: "会话",
     sessionsSub: (perAccount: string, days: string) => `人均 ${perAccount} 次 · 人均活跃 ${days} 天`,
     tokens: "token",
-    cost: "估算费用",
-    costSub: "按 API 标价折算",
+    cost: (cost: string) => `估算费用 ${cost}`,
     tokensSub: (input: string, output: string) => `输入 ${input} · 输出 ${output}`,
   },
   activeList: {
@@ -107,11 +106,6 @@ export const analytics = {
     taps: (count: string, users: string) => `${count} 次 · ${users} 个账号`,
     note: "使用账号与上一期相比；执行器的工具调用（知识库、生图、发布）记在任务所属账号名下，不算活跃；知识库每个工具每 10 分钟最多记一次；「Clawpage 被访问」记在页面主人名下。",
   },
-  platforms: {
-    versions: "在用的界面版本",
-    version: (platform: string, version: string, users: string) => `${platform} ${version} · ${users} 个账号`,
-    noVersions: "还没有版本数据（新版界面打开后上报）。",
-  },
   quality: {
     outcomes: { completed: "完成", other: "进行中及其他", interrupted: "中断", failed: "失败或结果未知" },
     share: (label: string, n: string, pct: string) => `${label} ${n}（${pct}）`,
@@ -148,7 +142,7 @@ export const analytics = {
   } as Record<string, string>,
   /** Opening the console, per platform (src/ui/src/bootTiming.ts): each step's median / P90 from the start of the opening. */
   boot: {
-    columns: { platform: "平台", opens: "打开次数", cached: "从缓存打开", ttfb: "首字节", dom: "页面就绪", version: "版本", session: "登录", feed: "对话流", cover: "开屏收起" },
+    columns: { platform: "平台", opens: "打开次数", cached: "从缓存打开", ttfb: "首字节", dom: "页面就绪", session: "登录", feed: "对话流", cover: "开屏收起" },
     note: "每次打开控制台记一次，各步为从开始打开起算的毫秒数（中位数 / P90）。「从缓存打开」是 service worker 直接用保存的页面、不等网络的次数。开屏收起前会等加载动画画完一轮。",
     empty: "这个时间段还没有记录到打开数据。",
   },

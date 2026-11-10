@@ -9,7 +9,7 @@ export const analytics: typeof zh = {
   range: "期間",
   lastDays: (n: number) => `過去 ${n} 日`,
   stale: (error: string) => `${error} · データが古い可能性があります`,
-  meta: (timezone: string, updated: string) => `${timezone} · ${updated} に更新 · 1 分ごとに更新`,
+  updated: (time: string) => `${time} に更新`,
   olderControl: "コントロールプレーンがこのダッシュボードより古いため、基本の数値だけを表示しています。更新すると、ファネル、定着、機能の利用、タスクの品質、アカウント一覧が表示されます。",
   vsPrevious: (n: number) => `その前の ${n} 日との比較`,
   deltaNew: "新規",
@@ -23,7 +23,7 @@ export const analytics: typeof zh = {
     activation: "アクティベーションファネル",
     retention: "新規アカウントの定着",
     features: "機能の利用",
-    platforms: "プラットフォームとバージョン",
+    platforms: "プラットフォーム",
     quality: "タスクの品質",
     boot: "起動速度",
     accounts: "アカウントと使用量",
@@ -45,8 +45,7 @@ export const analytics: typeof zh = {
     sessions: "セッション",
     sessionsSub: (perAccount: string, days: string) => `1 アカウントあたり ${perAccount} · 平均 ${days} 日アクティブ`,
     tokens: "トークン",
-    cost: '推定コスト',
-    costSub: 'API 定価で換算',
+    cost: (cost: string) => `推定コスト ${cost}`,
     tokensSub: (input: string, output: string) => `入力 ${input} · 出力 ${output}`,
   },
   activeList: {
@@ -108,11 +107,6 @@ export const analytics: typeof zh = {
     taps: (count: string, users: string) => `${count} 回 · ${users} アカウント`,
     note: "アカウント数はその前の期間と比較しています。実行エンジンによるツールの利用（ナレッジベース、画像、公開）はタスクのアカウントに数えますが、アクティブには数えません。ナレッジベースの各ツールは 10 分に 1 回まで数えます。Clawpages の閲覧はページのオーナーに数えます。",
   },
-  platforms: {
-    versions: "利用中のコンソールのバージョン",
-    version: (platform: string, version: string, users: string) => `${platform} ${version} · ${users} アカウント`,
-    noVersions: "バージョンのデータはまだありません（更新後のコンソールが開いたときに報告されます）。",
-  },
   quality: {
     outcomes: { completed: "完了", other: "実行中・その他", interrupted: "中断", failed: "失敗・不明" },
     share: (label: string, n: string, pct: string) => `${label} ${n}（${pct}）`,
@@ -147,7 +141,7 @@ export const analytics: typeof zh = {
     browser_restore_failed: "ブラウザの復元失敗", shared_kb_create: "共有ナレッジベースの作成", shared_kb_invite: "共有ナレッジベースへの招待", shared_kb_join: "共有ナレッジベースへの参加",
   },
   boot: {
-    columns: { platform: "プラットフォーム", opens: "起動回数", cached: "キャッシュから", ttfb: "最初のバイト", dom: "ページ準備", version: "バージョン", session: "ログイン", feed: "会話", cover: "起動画面の終了" },
+    columns: { platform: "プラットフォーム", opens: "起動回数", cached: "キャッシュから", ttfb: "最初のバイト", dom: "ページ準備", session: "ログイン", feed: "会話", cover: "起動画面の終了" },
     note: "コンソールを開くたびに記録し、各ステップは開き始めからのミリ秒（中央値 / P90）。「キャッシュから」は service worker が保存済みのページをネットワークを待たずに返した回数。起動画面はロゴの描画が一巡してから閉じます。",
     empty: "この期間の起動データはまだありません。",
   },

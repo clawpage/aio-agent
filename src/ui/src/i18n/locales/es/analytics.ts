@@ -9,7 +9,7 @@ export const analytics: typeof zh = {
   range: "Periodo",
   lastDays: (n: number) => `Últimos ${n} días`,
   stale: (error: string) => `${error} · Los datos pueden estar desactualizados`,
-  meta: (timezone: string, updated: string) => `${timezone} · Actualizado ${updated} · Se actualiza cada minuto`,
+  updated: (time: string) => `Actualizado ${time}`,
   olderControl: "El plano de control es anterior a este panel, así que solo se ven las cifras básicas. El embudo, la retención, el uso de funciones, la calidad de las tareas y las cuentas aparecen cuando se actualice.",
   vsPrevious: (n: number) => `Frente a los ${n} días anteriores`,
   deltaNew: "Nuevo",
@@ -23,7 +23,7 @@ export const analytics: typeof zh = {
     activation: "Embudo de activación",
     retention: "Retención de cuentas nuevas",
     features: "Uso de funciones",
-    platforms: "Plataformas y versiones",
+    platforms: "Plataformas",
     quality: "Calidad de las tareas",
     boot: "Velocidad de apertura",
     accounts: "Cuentas y uso",
@@ -45,8 +45,7 @@ export const analytics: typeof zh = {
     sessions: "Sesiones",
     sessionsSub: (perAccount: string, days: string) => `${perAccount} por cuenta · ${days} días activos de media`,
     tokens: "Tokens",
-    cost: 'Coste est.',
-    costSub: 'A precios de lista de la API',
+    cost: (cost: string) => `Coste est. ${cost}`,
     tokensSub: (input: string, output: string) => `Entrada ${input} · salida ${output}`,
   },
   activeList: {
@@ -108,11 +107,6 @@ export const analytics: typeof zh = {
     taps: (count: string, users: string) => `${count} usos · ${users} ${users === "1" ? "cuenta" : "cuentas"}`,
     note: "Las cuentas se comparan con el periodo anterior. Las herramientas que usa el ejecutor (base de conocimiento, imágenes, publicar) cuentan para la cuenta de la tarea pero no como actividad; cada herramienta de la base de conocimiento cuenta como mucho una vez cada 10 minutos. Las visitas a Clawpages cuentan para el dueño de la página.",
   },
-  platforms: {
-    versions: "Versiones de la consola en uso",
-    version: (platform: string, version: string, users: string) => `${platform} ${version} · ${users} ${users === "1" ? "cuenta" : "cuentas"}`,
-    noVersions: "Aún no hay datos de versión (los envía la consola actualizada al abrirse).",
-  },
   quality: {
     outcomes: { completed: "Completadas", other: "En curso y otras", interrupted: "Interrumpidas", failed: "Fallidas o desconocidas" },
     share: (label: string, n: string, pct: string) => `${label} ${n} (${pct})`,
@@ -147,7 +141,7 @@ export const analytics: typeof zh = {
     browser_restore_failed: "Restauraciones del navegador fallidas", shared_kb_create: "Bases compartidas creadas", shared_kb_invite: "Invitaciones a bases compartidas", shared_kb_join: "Uniones a bases compartidas",
   },
   boot: {
-    columns: { platform: "Plataforma", opens: "Aperturas", cached: "Desde caché", ttfb: "Primer byte", dom: "Página lista", version: "Versión", session: "Sesión", feed: "Conversación", cover: "Portada retirada" },
+    columns: { platform: "Plataforma", opens: "Aperturas", cached: "Desde caché", ttfb: "Primer byte", dom: "Página lista", session: "Sesión", feed: "Conversación", cover: "Portada retirada" },
     note: "Se registra cada apertura de la consola; cada paso en milisegundos desde el inicio de la apertura (mediana / P90). «Desde caché» cuenta las aperturas que el service worker sirvió con la página guardada sin esperar a la red. La marca de carga se retira solo al terminar su dibujo.",
     empty: "Aún no hay aperturas registradas en este periodo.",
   },
