@@ -16,15 +16,19 @@ const USERS: Record<string, string> = { owner_1: "owner", user_cr: "cr" };
 it("offers the home printer to the listed accounts only, rasterizing in the account's sandbox and printing over IPP", async () => {
   const h = await startHarness();
   // A stand-in IPP printer: answers Get-Printer-Attributes from `printer`, records every request.
-  const seen: Array<{ op: number; attrs: Record<string, unknown[]>; body: Buffer }> = [];
+  const seen: Array<{ op: number; attrs: Record<string, unknown[]>; collections: Record<string, unknown[]>; body: Buffer }> = [];
   let printer = { state: 3, reasons: ["none"] };
+  // Photo paper in the main tray, plain Letter in the other; each listed with and without margins, as real printers do.
+  const tray = (x: number, y: number, type: string, source: string) =>
+    [300, 0].map((margin) => ({ "media-size": { "x-dimension": x, "y-dimension": y }, "media-top-margin": margin, "media-type": type, "media-source": source }));
+  let trays: unknown[] = [...tray(10160, 15240, "photographic-high-gloss", "main"), ...tray(21590, 27940, "stationery", "alternate")];
   let dropPrintJob = false;
   const upstream = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
     const body = Buffer.concat(chunks);
     const parsed = decodeResponse(body); // a request has the same layout; "status" is the operation
-    seen.push({ op: parsed.status, attrs: parsed.attrs, body });
+    seen.push({ op: parsed.status, attrs: parsed.attrs, collections: parsed.collections, body });
     if (parsed.status === 0x0002 && dropPrintJob) return req.socket.destroy();
     const answer =
       parsed.status === 0x000b
@@ -34,7 +38,8 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
             [TAG.text, "printer-make-and-model", "EPSON WF-4830 Series"],
             [TAG.name, "marker-names", ["Black ink", "Cyan ink"]],
             [TAG.integer, "marker-levels", [99, 40]],
-            [TAG.keyword, "media-ready", ["na_letter_8.5x11in", "na_letter_8.5x11in"]],
+            [TAG.keyword, "media-ready", ["na_index-4x6_4x6in", "na_letter_8.5x11in"]],
+            ...(trays.length ? [[TAG.begCollection, "media-col-ready", trays] as never] : []),
           ])
         : encodeRequest(0, 1, "ipp://printer", [[TAG.integer, "job-id", 17], [TAG.enum, "job-state", 5]]);
     res.writeHead(200, { "content-type": "application/ipp" }).end(answer);
@@ -83,7 +88,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     expect(status.isError).toBeUndefined();
     expect(status.content[0]!.text).toContain("Status: idle");
     expect(status.content[0]!.text).toContain("Ink: Black 99%, Cyan 40%");
-    expect(status.content[0]!.text).toContain("Paper: Letter");
+    expect(status.content[0]!.text).toContain("Paper: 4x6 (photo paper, main tray), Letter (plain paper, alternate tray)");
 
     // A print: the account's own sandbox makes the pages, the printer gets them with the job's settings.
     const file = "/home/gem/workspace/tasks/t1/报告.pdf";
@@ -91,6 +96,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     const printed = await call("print_file", { path: file, pages: "1-2, 4", copies: 2, sides: "two-sided-long-edge", color: false });
     expect(printed.isError).toBeUndefined();
     expect(printed.content[0]!.text).toContain("3 pages × 2 copies");
+    expect(printed.content[0]!.text).toContain("on Letter (plain paper, alternate tray)");
     expect(printed.content[0]!.text).toContain("Job 17");
     expect(asked).toEqual([{ userId: "owner_1", file, opts: { color: false, sides: "two-sided-long-edge", media: "na_letter_8.5x11in", width: 2550, height: 3300, pages: [1, 2, 4] } }]);
     const job = seen.find((s) => s.op === 0x0002)!;
@@ -101,9 +107,38 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
       copies: [2],
       sides: ["two-sided-long-edge"],
       "print-color-mode": ["monochrome"],
-      media: ["na_letter_8.5x11in"],
     });
+    // No paper named: plain paper, though the photo paper is listed first; the job names its size, tray and type.
+    expect(job.attrs.media).toBeUndefined();
+    expect(job.collections["media-col"]).toEqual([{ "media-size": { "x-dimension": 21590, "y-dimension": 27940 }, "media-source": "alternate", "media-type": "stationery" }]);
     expect(job.body.subarray(job.body.length - RASTER.length).equals(RASTER)).toBe(true);
+
+    // A named paper: pages are made at its size and the job asks for its tray.
+    asked.length = 0;
+    seen.length = 0;
+    const photo = await call("print_file", { path: "/home/gem/workspace/a.jpg", paper: "4 × 6" });
+    expect(photo.content[0]!.text).toContain("on 4x6 (photo paper, main tray)");
+    expect(asked[0]!.opts).toMatchObject({ media: "na_index-4x6_4x6in", width: 1200, height: 1800 });
+    expect(seen.find((s) => s.op === 0x0002)!.collections["media-col"]).toEqual([{ "media-size": { "x-dimension": 10160, "y-dimension": 15240 }, "media-source": "main", "media-type": "photographic-high-gloss" }]);
+
+    // A paper that is not loaded is refused with what is; so is a document when only photo paper is loaded.
+    asked.length = 0;
+    seen.length = 0;
+    const missing = await call("print_file", { path: file, paper: "A4" });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0]!.text).toContain("A4 paper is not loaded; nothing was printed. Loaded now: 4x6 (photo paper, main tray), Letter (plain paper, alternate tray)");
+    trays = tray(10160, 15240, "photographic-high-gloss", "main");
+    const photoOnly = await call("print_file", { path: file });
+    expect(photoOnly.isError).toBe(true);
+    expect(photoOnly.content[0]!.text).toContain("No plain paper is loaded");
+    expect(asked).toEqual([]);
+    expect(seen.some((s) => s.op === 0x0002)).toBe(false);
+
+    // A printer that only lists media names: the size by name, no tray.
+    trays = [];
+    expect((await call("printer_status")).content[0]!.text).toContain("Paper: 4x6, Letter");
+    await call("print_file", { path: file, paper: "letter" });
+    expect(seen.find((s) => s.op === 0x0002)!.attrs.media).toEqual(["na_letter_8.5x11in"]);
 
     // Refused before anything is rendered or sent.
     asked.length = 0;

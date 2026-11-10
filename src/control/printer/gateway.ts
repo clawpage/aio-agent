@@ -6,7 +6,7 @@ import type { Config } from "../config.js";
 import type { AppContext } from "../context.js";
 import type { Logger } from "../../common/logger.js";
 import { requireWorkspaceFilePath } from "../documents/paths.js";
-import { OP, TAG, ippRequest, encodeRequest, type IppResponse } from "./ipp.js";
+import { OP, TAG, ippRequest, encodeRequest, type IppCollection, type IppResponse } from "./ipp.js";
 
 /**
  * The home printer (an IPP Everywhere printer on the LAN), offered to the
@@ -24,13 +24,80 @@ const PICTURE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
 const SIDES = ["one-sided", "two-sided-long-edge", "two-sided-short-edge"] as const;
 type Sides = (typeof SIDES)[number];
 
-/** Paper sizes at 300 dpi, by PWG media name; the printer's loaded paper picks one. */
-const MEDIA: Record<string, { width: number; height: number; label: string }> = {
-  "na_letter_8.5x11in": { width: 2550, height: 3300, label: "Letter" },
-  "iso_a4_210x297mm": { width: 2480, height: 3508, label: "A4" },
-  "na_legal_8.5x14in": { width: 2550, height: 4200, label: "Legal" },
-};
-const mediaOf = (name: string) => MEDIA[name];
+const DPI = 300;
+/** Paper sizes people name, with their PWG media name and size in hundredths of a millimetre. */
+const SIZES: Array<{ media: string; label: string; x: number; y: number }> = [
+  { media: "na_letter_8.5x11in", label: "Letter", x: 21590, y: 27940 },
+  { media: "iso_a4_210x297mm", label: "A4", x: 21000, y: 29700 },
+  { media: "na_legal_8.5x14in", label: "Legal", x: 21590, y: 35560 },
+  { media: "na_index-4x6_4x6in", label: "4x6", x: 10160, y: 15240 },
+  { media: "na_5x7_5x7in", label: "5x7", x: 12700, y: 17780 },
+  { media: "na_govt-letter_8x10in", label: "8x10", x: 20320, y: 25400 },
+  { media: "oe_photo-l_3.5x5in", label: "3.5x5", x: 8890, y: 12700 },
+  { media: "iso_a6_105x148mm", label: "A6", x: 10500, y: 14800 },
+];
+const LETTER = SIZES[0]!;
+
+/** One paper the printer has loaded; `type` and `source` only when the printer says which tray holds what. */
+interface Paper {
+  media: string;
+  label: string;
+  x: number;
+  y: number;
+  type?: string;
+  source?: string;
+}
+
+const pixels = (hundredthsMm: number) => Math.round((hundredthsMm / 2540) * DPI);
+const isPlain = (p: Paper) => !p.type || p.type.startsWith("stationery");
+const kindOf = (type: string) => (type.startsWith("stationery") ? "plain paper" : type.startsWith("photographic") ? "photo paper" : type);
+const describe = (p: Paper) => `${p.label}${p.type ? ` (${[kindOf(p.type), p.source ? `${p.source} tray` : ""].filter(Boolean).join(", ")})` : ""}`;
+
+function sized(x: number, y: number): Pick<Paper, "media" | "label" | "x" | "y"> {
+  return SIZES.find((s) => s.x === x && s.y === y) ?? { media: `custom_${x / 100}x${y / 100}mm`, label: `${x / 100}x${y / 100}mm`, x, y };
+}
+
+/** The papers loaded now: one per size and tray, in the printer's order. */
+function loadedPapers(res: Pick<IppResponse, "attrs" | "collections">): Paper[] {
+  const papers: Paper[] = [];
+  const add = (p: Paper) => {
+    if (!papers.some((o) => o.x === p.x && o.y === p.y && o.source === p.source)) papers.push(p);
+  };
+  for (const col of res.collections["media-col-ready"] ?? []) {
+    const size = col["media-size"] as IppCollection | undefined;
+    const x = Number(size?.["x-dimension"]);
+    const y = Number(size?.["y-dimension"]);
+    if (!(x > 0 && y > 0)) continue;
+    add({ ...sized(x, y), ...(typeof col["media-type"] === "string" ? { type: col["media-type"] } : {}), ...(typeof col["media-source"] === "string" ? { source: col["media-source"] } : {}) });
+  }
+  if (papers.length) return papers;
+  for (const name of (res.attrs["media-ready"] ?? []).map(String)) {
+    const known = SIZES.find((s) => s.media === name);
+    const m = /_(\d+(?:\.\d+)?)x(\d+(?:\.\d+)?)(in|mm)$/.exec(name);
+    const unit = m?.[3] === "in" ? 2540 : 100;
+    if (known) add({ ...known });
+    else if (m) add({ media: name, label: name, x: Math.round(Number(m[1]) * unit), y: Math.round(Number(m[2]) * unit) });
+  }
+  return papers;
+}
+
+const paperKey = (text: string) => text.toLowerCase().replace(/[\s"”″]/g, "").replace(/[×*]/g, "x").replace(/(in|inch|inches)$/, "");
+
+/** The paper for one job: the one asked for, or plain document paper when none is named. */
+function choosePaper(papers: Paper[], wanted: string): Paper {
+  const loaded = papers.map(describe).join(", ");
+  if (wanted) {
+    const key = paperKey(wanted);
+    const found = papers.find((p) => paperKey(p.label) === key || p.media === wanted);
+    if (!found) throw new PrintError(`${wanted} paper is not loaded; nothing was printed. Loaded now: ${loaded || "unknown"}. Ask the user to load it (and set its size on the printer), or print on a loaded paper.`);
+    return found;
+  }
+  // A printer that does not say what is loaded gets Letter, its usual default.
+  if (!papers.length) return { ...LETTER };
+  const plain = papers.find(isPlain);
+  if (!plain) throw new PrintError(`No plain paper is loaded (loaded now: ${loaded}); nothing was printed. Pass paper to print on what is loaded, or ask the user to load plain paper.`);
+  return plain;
+}
 
 const STATES: Record<number, string> = { 3: "idle", 4: "printing", 5: "stopped" };
 const JOB_STATES: Record<number, string> = { 3: "queued", 4: "held", 5: "printing", 6: "paused", 7: "canceled", 8: "aborted", 9: "finished printing" };
@@ -68,6 +135,7 @@ const TOOLS = [
         copies: { type: "integer", minimum: 1, maximum: MAX_COPIES, description: "Number of copies, default 1" },
         sides: { type: "string", enum: SIDES, description: "One- or two-sided: one-sided (default); two-sided-long-edge flips on the long edge (ordinary portrait documents); two-sided-short-edge flips on the short edge" },
         color: { type: "boolean", description: "false prints in black and white (saves color ink); color by default" },
+        paper: { type: "string", description: "The paper to print on, one of the papers printer_status lists as loaded, e.g. \"Letter\", \"A4\", \"4x6\". Omit for plain document paper; photo paper is used only when named here" },
       },
       required: ["path"],
     },
@@ -87,7 +155,7 @@ export function printerMcpServers(cfg: Config): Record<string, unknown> {
 export const PRINTER_POLICY =
   "The home printer is connected (aio_printer): when the user wants a file, photo, web page, or a document you made printed, print it directly with print_file; do not make the user print it themselves. " +
   "It only accepts PDFs and images in the workspace: convert Word, Excel, PPT, text, and so on to PDF in the sandbox first (e.g. soffice --headless --convert-to pdf), save web pages as PDF first, then print the converted file. " +
-  "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, and color or black and white, and if they did not say, use 1 copy, one-sided, color. Confirm with the user first for more than 20 pages or multiple copies. " +
+  "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, color or black and white, and paper, and if they did not say, use 1 copy, one-sided, color, on plain paper. The printer can hold several papers at once (e.g. Letter plain paper and 4x6 photo paper): printer_status lists them; pass paper to print_file when the user names a size or wants a photo print on photo paper, and when it is unclear which paper they mean, ask. Confirm with the user first for more than 20 pages or multiple copies. " +
   "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer.";
 
 /** Turning one account's workspace file into printer pages. */
@@ -272,8 +340,8 @@ export class PrinterGateway {
     return await ippRequest(this.#printerUri, document ? Buffer.concat([request, document]) : request, timeoutMs);
   }
 
-  async #printerAttributes(): Promise<IppResponse["attrs"]> {
-    const wanted = ["printer-state", "printer-state-reasons", "printer-state-message", "marker-names", "marker-levels", "media-ready", "printer-make-and-model", "queued-job-count"];
+  async #printer(): Promise<IppResponse> {
+    const wanted = ["media-col-ready", "printer-state", "printer-state-reasons", "printer-state-message", "marker-names", "marker-levels", "media-ready", "printer-make-and-model", "queued-job-count"];
     let res: IppResponse;
     try {
       res = await this.#ipp(OP.getPrinterAttributes, [[TAG.keyword, "requested-attributes", wanted]]);
@@ -281,16 +349,17 @@ export class PrinterGateway {
       throw new PrintError(`Cannot reach the printer (${err instanceof Error ? err.message : String(err)}): it may be turned off or not on the network`);
     }
     if (res.status >= 0x0100) throw new PrintError(`The printer refused the query (IPP status 0x${res.status.toString(16)})`);
-    return res.attrs;
+    return res;
   }
 
   async #status(): Promise<string> {
-    const a = await this.#printerAttributes();
+    const res = await this.#printer();
+    const a = res.attrs;
     const reasons = problems(a);
     const names = (a["marker-names"] ?? []).map(String);
     const levels = a["marker-levels"] ?? [];
     const ink = names.map((n, i) => `${n.replace(/ ink$/i, "")} ${Number(levels[i]) >= 0 ? `${levels[i]}%` : "unknown"}`).join(", ");
-    const paper = [...new Set((a["media-ready"] ?? []).map((m) => mediaOf(String(m))?.label ?? String(m)))].join(", ");
+    const paper = loadedPapers(res).map(describe).join(", ");
     return [
       `Printer: ${a["printer-make-and-model"]?.[0] ?? "unknown model"}`,
       `Status: ${STATES[Number(a["printer-state"]?.[0])] ?? "unknown"}${reasons.length ? ` (${reasons.join(", ")})` : ""}`,
@@ -312,13 +381,19 @@ export class PrinterGateway {
     const sides = (args.sides ?? "one-sided") as Sides;
     if (!SIDES.includes(sides)) throw new PrintError(`sides must be ${SIDES.join(" / ")}`);
     const color = args.color !== false;
+    const wanted = typeof args.paper === "string" ? args.paper.trim() : "";
 
     const job = this.#queue.then(async () => {
-      const a = await this.#printerAttributes();
+      const printer = await this.#printer();
+      const a = printer.attrs;
       if (Number(a["printer-state"]?.[0]) === 5) throw new PrintError(`The printer is stopped; nothing was printed: ${problems(a).join(", ") || "reason unknown"}`);
-      const loaded = String(a["media-ready"]?.[0] ?? "na_letter_8.5x11in");
-      const media = mediaOf(loaded) ? loaded : "na_letter_8.5x11in";
-      const { width, height } = mediaOf(media)!;
+      const paper = choosePaper(loadedPapers(printer), wanted);
+      const { media } = paper;
+      const [width, height] = [pixels(paper.x), pixels(paper.y)];
+      // Size, tray and paper type together when the printer told us them, so it cannot feed from another tray.
+      const mediaAttr: Parameters<typeof encodeRequest>[4] = paper.source
+        ? [[TAG.begCollection, "media-col", { "media-size": { "x-dimension": paper.x, "y-dimension": paper.y }, "media-source": paper.source, ...(paper.type ? { "media-type": paper.type } : {}) }]]
+        : [[TAG.keyword, "media", media]];
       const files = await this.#filesFor(account.userId);
       const raster = await files.rasterize(file, { color, sides, media, width, height, pages });
       const started = Date.now();
@@ -327,7 +402,7 @@ export class PrinterGateway {
         res = await this.#ipp(
           OP.printJob,
           [[TAG.name, "requesting-user-name", account.username], [TAG.name, "job-name", path.posix.basename(file).slice(0, 200)], [TAG.mime, "document-format", "image/pwg-raster"]],
-          [[TAG.integer, "copies", copies], [TAG.keyword, "sides", sides], [TAG.keyword, "print-color-mode", color ? "color" : "monochrome"], [TAG.keyword, "media", media]],
+          [[TAG.integer, "copies", copies], [TAG.keyword, "sides", sides], [TAG.keyword, "print-color-mode", color ? "color" : "monochrome"], ...mediaAttr],
           raster.bytes,
           180_000,
         );
@@ -339,10 +414,10 @@ export class PrinterGateway {
       if (res.status >= 0x0100) throw new PrintError(`The printer refused this job (IPP status 0x${res.status.toString(16)}${res.attrs["status-message"] ? `: ${res.attrs["status-message"][0]}` : ""}); nothing was printed`);
       const jobId = res.attrs["job-id"]?.[0];
       const state = JOB_STATES[Number(res.attrs["job-state"]?.[0])] ?? "received";
-      this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, bytes: raster.bytes.length, ms: Date.now() - started });
+      this.#log.info("print job sent", { user: account.username, jobId, pages: raster.pages, copies, sides, color, paper: describe(paper), bytes: raster.bytes.length, ms: Date.now() - started });
       const warn = problems(a);
       return [
-        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, ${mediaOf(media)!.label} paper.`,
+        `Sent to the printer: ${path.posix.basename(file)}, ${raster.pages} pages × ${copies} copies, ${sides === "one-sided" ? "one-sided" : "two-sided"}, ${color ? "color" : "black and white"}, on ${describe(paper)}.`,
         `Job ${jobId ?? "unknown"}, status: ${state}.`,
         warn.length ? `Printer notes: ${warn.join(", ")}` : "",
       ].filter(Boolean).join("\n");
