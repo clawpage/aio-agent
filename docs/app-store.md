@@ -130,3 +130,9 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 原生改动：AI 用的浏览器小窗移到右上角，轮到用户操作时可全屏，配色跟随控制台深浅色（`AIBrowser.swift`）。配套的服务端改动（手机中途离开时等待并通知、回来后自动继续）已在控制面上线。
 - 构建 `0.1.5 (0.1.5.2)`（`--build-number 2`），`altool` 上传成功（Delivery UUID `c3d25f1b-e9aa-4d21-8e6e-860ffd8a36c1`），已加入外部测试组、填中英文「测试内容」，同版本号无需再审，状态 `IN_BETA_TESTING`。
 - 只在模拟器上验过（`tests/devices/ios.e2e.test.ts` 6 项，深浅色截图）；真机未验。Android 暂无测试渠道（Play 0.1.6 未发）。
+
+## 2026-11-09 0.1.5 (0.1.5.3)：交还后浏览器自动缩回小窗（TestFlight）
+
+- 原生改动（`7747315`）：在 AI 浏览器里点「完成，交还给 AI」后，面板自己缩回右上角小窗（`AIBrowser.swift`），见 `docs/FEATURES.md`。
+- 构建 `0.1.5 (0.1.5.3)`（`--build-number 3`），`altool` 上传成功（Delivery UUID `9136506d-2ff4-43a3-9ed0-c5c44a4ee539`），处理为 VALID 后加入外部测试组、填中英文「测试内容」，同版本号无需再审，状态 `IN_BETA_TESTING`。
+- 模拟器上 `tests/devices/ios.e2e.test.ts` 6 项通过，但其中没有点「完成」这一步；交还后缩回小窗只编译通过，未在模拟器或真机上点过。
