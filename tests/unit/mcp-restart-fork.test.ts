@@ -46,3 +46,49 @@ it("continues a thread whose gateway tools failed to start on a fork, which star
   expect(codex.forkedThreads).toHaveLength(1);
   expect(codex.startedTurns[2]!.threadId).toBe(forked);
 });
+
+it("continues a thread that began before the execution environments on a fork, which has aio_env", async () => {
+  const codex = new FakeCodex();
+  const db = openDb(":memory:");
+  const cfg = testConfig("/tmp/pa-mcp-fork-env", 1);
+  const agent = new AgentManager({ cfg, db, log: new Logger("error", undefined, false), codex });
+  cleanups.push(() => { agent.shutdown(); db.close(); });
+  await agent.init();
+  const conv = agent.createConversation({ title: "iphone" });
+  const status = (threadId: string, name: string) =>
+    db.prepare("INSERT INTO events (conversation_id, turn_id, type, payload, created_at) VALUES (?, NULL, 'mcpServer/startupStatus/updated', ?, ?)")
+      .run(conv.id, JSON.stringify({ threadId, name, status: "ready" }), Date.now());
+
+  agent.submitTurn({ conversationId: conv.id, text: "one", clientMessageId: "m1" });
+  await tick();
+  const first = codex.startedTurns[0]!.threadId;
+  status(first, "aio_kb");
+  status(first, "aio_ios");
+  codex.completeTurn(codex.startedTurns[0]!.turnId);
+  await tick();
+
+  // Nothing changed for the account: the thread goes on as it is.
+  agent.submitTurn({ conversationId: conv.id, text: "two", clientMessageId: "m2" });
+  await tick();
+  expect(codex.forkedThreads).toHaveLength(0);
+  codex.completeTurn(codex.startedTurns[1]!.turnId);
+  await tick();
+
+  // The environments are turned on for the account: Codex keeps a thread's tool servers as they began.
+  cfg.env = { url: "http://host.docker.internal:1/env" };
+  agent.submitTurn({ conversationId: conv.id, text: "three", clientMessageId: "m3" });
+  await tick();
+  expect(codex.forkedThreads).toHaveLength(1);
+  expect(codex.forkedThreads[0]!.from).toBe(first);
+  const forked = codex.forkedThreads[0]!.threadId;
+  expect(codex.startedTurns[2]!.threadId).toBe(forked);
+  status(forked, "aio_kb");
+  status(forked, "aio_env");
+  codex.completeTurn(codex.startedTurns[2]!.turnId);
+  await tick();
+
+  agent.submitTurn({ conversationId: conv.id, text: "four", clientMessageId: "m4" });
+  await tick();
+  expect(codex.forkedThreads).toHaveLength(1);
+  expect(codex.startedTurns[3]!.threadId).toBe(forked);
+});

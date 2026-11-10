@@ -1182,13 +1182,15 @@ export class AgentManager {
     };
     if (!threadId) {
       threadId = await startThread(startsFresh ? conversation.codex_thread_id : null);
-    } else if (desiredProvider !== currentProvider || this.#failedGatewayServers(conversation.id, threadId).length) {
+    } else if (desiredProvider !== currentProvider || this.#failedGatewayServers(conversation.id, threadId).length || this.#lacksEnvServer(conversation.id, threadId)) {
       // Codex only honours `modelProvider` when a thread is created, so an
       // existing conversation switching providers continues on a fork that keeps
       // the history. Resuming would silently stay on the old provider.
       // The same goes for a gateway tool server (aio_*) that failed to start on this
       // thread: Codex starts a thread's MCP servers once and never retries them there,
       // while a fork starts them again (a phone whose Mac was offline at that moment).
+      // And for a thread that began before the account had the execution environments (or after
+      // they were taken away): it keeps the tool servers it began with, a fork gets today's.
       const failed = this.#failedGatewayServers(conversation.id, threadId);
       const forked = await this.#codex.forkThread(threadId, {
         developerInstructions,
@@ -1210,8 +1212,10 @@ export class AgentManager {
           to: desiredProvider,
           model,
         });
-      } else {
+      } else if (failed.length) {
         this.#log.info("conversation forked its thread to start failed tools again", { conversationId: conversation.id, failed });
+      } else {
+        this.#log.info("conversation forked its thread to get today's tool servers", { conversationId: conversation.id });
       }
       this.#appendEvent(conversation.id, turn.id, "thread.started", {
         threadId,
@@ -1401,6 +1405,23 @@ export class AgentManager {
       } catch { /* not a status we can read */ }
     }
     return [...latest].filter(([, status]) => status === "failed").map(([name]) => name);
+  }
+
+  /**
+   * Whether this thread's gateway tool servers began on the other side of the execution environments
+   * (docs/EXEC-ENVS.md): without aio_env while the account has it now, or the reverse. A thread whose
+   * servers were never recorded is left alone.
+   */
+  #lacksEnvServer(conversationId: string, threadId: string): boolean {
+    const names = new Set<string>();
+    const rows = this.#db.prepare("SELECT payload FROM events WHERE conversation_id = ? AND type = 'mcpServer/startupStatus/updated' ORDER BY id").all(conversationId) as Array<{ payload: string }>;
+    for (const row of rows) {
+      try {
+        const p = JSON.parse(row.payload) as { threadId?: string; name?: string };
+        if (p.threadId === threadId && p.name?.startsWith("aio_")) names.add(p.name);
+      } catch { /* not a status we can read */ }
+    }
+    return names.size > 0 && names.has("aio_env") !== Boolean(this.#cfg.env);
   }
 
   /** Which provider the next turn on `model` runs on, and whether it starts a fresh thread. */
