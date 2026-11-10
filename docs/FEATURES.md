@@ -1059,6 +1059,22 @@ iOS App 可以把那台 iPhone 的相册、提醒事项和日历交给**在这�
 - **写入要确认**：执行规则要求只在用户要求或确认后才添加/完成提醒事项、添加日程；写入途中连接中断时报告“是否已保存未知，先列出核对再重试”，不自动重发。
 - **日志**：控制面每次调用记一行（账号、工具、成败、耗时、照片张数与字节数），App 记工具名与成败；都不记内容。
 
+### Android App 的浏览器与文件夹
+
+Android App（Google Play 版）是一个执行环境（`docs/EXEC-ENVS.md`，种类 `android`，设备协议 1），给**在这台手机上登录的账号**的执行器两样东西：App 自己的浏览器（`browser`）和 App 自己的文件夹（`files`），经 `aio_env`（`PA_EXEC_ENVS=1` 时）。
+App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/agent/`：`DeviceTools.kt`（连接、清单、调用）、`AIBrowser.kt`、`DeviceFiles.kt`。没有无障碍服务，不申请新的危险权限，不读相册。
+
+- **连接**：与 iPhone 相同的规则。App 自己（OkHttp WebSocket）连 `wss://<主站>/api/device-link/connect`（连接种类 `android`），回答 `GET /env/manifest`（`deviceId` 是 `ANDROID_ID` 的哈希，名称取系统设备名）和 `POST /env/call`，回到前台时推送 `manifest` 事件；退到后台时（等手头的调用答完，最多 5 秒）断开，回到前台立即重连。
+  令牌和它属于的账号存在 App 的 no-backup 目录（`device-link.json`，备份不带走）；连接被移除（4001）或令牌失效（401）时 App 忘掉令牌。
+  控制台经 `aioDeviceTools`（只对主站主框架注入，JSON 字符串，带 `seq`，回答带同一个 `seq`）交令牌（`link`）、说明当前账号（`account`：同一账号才连接，退出登录断开，换别的账号登录即忘掉令牌）、`unlink`、`status`。
+  **控制台还没有在 Android App 里连接的入口**（「iPhone 能力」只认 iOS 的桥接）：App 端已就绪，界面另做。
+- **浏览器**：控制台之上的一个小窗（实时缩小的页面），点开全屏，有「最小化」「关闭」，返回键先后退、再缩小；它有自己的 WebView profile，登录状态与控制台分开。
+  Android 的 WebView 没有隔离的脚本世界，所以读页和操作的脚本运行在页面自己的世界里，但不留下任何东西（不加属性、节点、全局变量，不改原型）；元素的 ref 是它在页面控件里的序号，每次按同一方式重新找到，并核对上次读页时的指纹，页面变了就让 AI 重新读。
+  点击是对元素中心的真实触摸（页面停稳后测量），输入是键盘的文字（经 WebView 自己的输入连接，支持中文）、回车是真实按键，滚动是手指滑动，页面看到的事件都是 `isTrusted`。只有真实输入做不到时才用脚本：元素被遮住或无法滚到屏幕上的点击、下拉框的取值、键盘连接没送到的文字（都记日志）。
+  不改 User-Agent（WebView 自己的，带 `; wv`）；请求 WebView 不发 `X-Requested-With`（模拟器里的 WebView 124 仍在主框架导航上发送）。付款、下单、发送、删除、登录授权类的点击先在手机上弹窗确认，`browser_request_human` 全屏显示 AI 的请求和「完成，交还给 AI」，密码不代填，与 iPhone 相同。
+- **文件夹**：App 专属存储里的 `AI Files`（`Android/data/ai.clawpage.agent/files/AI Files`，不需要存储权限），`files_list` / `files_pull` / `files_push`，路径出不了这个文件夹；同名文件存为「名 (2)」。
+  放进手机的文件最大 20 MB；取回工作区的最大 8 MB（应答在设备连接上是一条消息，两次 base64 后不能超过 OkHttp 单条 16 MB 的发送上限）。
+
 ### Clawpages（可分享、可存数据的页面）
 
 沙箱内置 `clawpages` skill（原名 `aio-share`，重新播种时删除旧目录），Codex 与 Claude Code 两个执行器都装：智能体把页面目录

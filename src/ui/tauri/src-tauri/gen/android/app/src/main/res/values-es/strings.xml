@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The agent's own browser over the console (AIBrowser.kt), the same words as the iPhone app's. -->
+    <string name="aio_browser_title">Navegador de la IA</string>
+    <string name="aio_browser_minimize">Minimizar</string>
+    <string name="aio_browser_close">Cerrar</string>
+    <string name="aio_browser_done">Listo, devolver a la IA</string>
+    <string name="aio_browser_asks">La IA te pide:</string>
+    <string name="aio_confirm_title">¿Permitir que la IA haga esto?</string>
+    <string name="aio_confirm_allow">Permitir</string>
+    <string name="aio_confirm_decline">No permitir</string>
+</resources>

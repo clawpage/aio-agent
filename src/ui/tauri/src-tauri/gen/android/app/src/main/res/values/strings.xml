@@ -2,4 +2,13 @@
     <!-- The English brand everywhere but Chinese, which keeps 一站 (values-zh). -->
     <string name="app_name">Clawpage Agent</string>
     <string name="main_activity_title">Clawpage Agent</string>
+    <!-- The agent's own browser over the console (AIBrowser.kt), the same words as the iPhone app's. -->
+    <string name="aio_browser_title">AI browser</string>
+    <string name="aio_browser_minimize">Minimize</string>
+    <string name="aio_browser_close">Close</string>
+    <string name="aio_browser_done">Done, hand back to AI</string>
+    <string name="aio_browser_asks">The AI asks you to:</string>
+    <string name="aio_confirm_title">Allow the AI to do this?</string>
+    <string name="aio_confirm_allow">Allow</string>
+    <string name="aio_confirm_decline">Don\'t allow</string>
 </resources>

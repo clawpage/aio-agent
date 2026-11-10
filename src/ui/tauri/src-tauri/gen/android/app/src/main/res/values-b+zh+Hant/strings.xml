@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The agent's own browser over the console (AIBrowser.kt), the same words as the iPhone app's. -->
+    <string name="aio_browser_title">AI 瀏覽器</string>
+    <string name="aio_browser_minimize">收起</string>
+    <string name="aio_browser_close">關閉</string>
+    <string name="aio_browser_done">完成，交還給 AI</string>
+    <string name="aio_browser_asks">AI 請你操作：</string>
+    <string name="aio_confirm_title">允許 AI 執行這一步嗎？</string>
+    <string name="aio_confirm_allow">允許</string>
+    <string name="aio_confirm_decline">不允許</string>
+</resources>

@@ -121,6 +121,25 @@ submit an order or a payment waits for the person's confirmation on the device. 
 App-Bound Domains, which would confine these scripts to our own domains (so no service worker on
 iOS: see "Offline" in `src/ui/tauri/README.md`).
 
+## The Android app's browser
+
+The same panel in the Android app (`AIBrowser.kt`): a second web view over the console, with a WebView
+profile of its own (its sign-ins are apart from the console's), shown as a small live window that opens
+full screen, with Minimize and Close; Back goes back in it or makes it small again. Android's WebView
+has no isolated script world, so the scripts run in the page's own world and leave nothing behind: each is
+a function that returns, with no global, attribute, node or patched prototype. An element's ref is its
+place in the same enumeration of the page's controls on every call, checked against a fingerprint from
+the last read; a page that changed answers "read the page again". Clicks are real touches on the
+element's centre (measured once the page holds still), typing is the keyboard's text through the web
+view's own input connection (Chinese too) and Enter a real key, scrolling a finger's swipe, so the page
+sees trusted events; the emulator test's probe page holds `attrs=0 nodes=0 global=false marked=false
+click=trusted value=Alice input=trusted`. Script stands in only where real input cannot: a click on an
+element something covers or that cannot be brought on screen, a select's value, and text the keyboard
+connection did not deliver (each logged). The user agent is WebView's own (`…; wv) … Version/4.0
+Chrome/…`, client hints brand "Android WebView"), not changed; the app asks WebView not to send its
+`X-Requested-With` header, which WebView 124 (the emulator's) still sent on a main-frame navigation.
+Confirmation, `browser_request_human` and the refusal to type passwords are as on the iPhone.
+
 ## Distribution
 
 - **App Store iOS app** and **Google Play Android app**: `browser`, `files`, `photos`, `calendar` (and
@@ -135,7 +154,7 @@ iOS: see "Offline" in `src/ui/tauri/README.md`).
 
 1. Control plane: environment registry, `aio_env`, adapters for old devices, the brief. (iOS first.)
 2. iPhone app: `/env/manifest`, `/env/call`, the in-app browser and files, foreground events.
-3. Android app (Play build): device link, browser, files, photos, calendar.
+3. Android app (Play build): device link, browser, files (done), photos, calendar.
 4. Android APK: pairing, shell helper, virtual display, `apps` / `screen`.
 
 ## Retiring the old servers
@@ -151,4 +170,5 @@ speaking protocol 1 are live and the device-link log shows no old-protocol devic
   the edge (adb, mobile-mcp, Chrome, a tmux server of its own): ids kept from the old adapter, phones plugged
   in and out, Chrome appearing, the terminal off and on, and the old endpoints still answering.
 - `tests/devices/ios.e2e.test.ts`: the real iPhone app in the simulator against a local control plane.
-- `tests/devices/android.e2e.mjs`: the real Android app in the emulator, both builds.
+- `tests/devices/android.e2e.test.ts`: the real Android app (the Play build) in the emulator against a local
+  control plane: the same behaviours as the iPhone's, typing in Chinese included.

@@ -197,6 +197,7 @@ class MainActivity : TauriActivity() {
     super.onNewIntent(intent)
     setIntent(intent)
     receiveAuth(intent)
+    DeviceTools.debugLink(intent)
   }
   override fun onWebViewCreate(webView: WebView) {
     super.onWebViewCreate(webView)
@@ -234,6 +235,12 @@ class MainActivity : TauriActivity() {
         val seq = body.optInt("seq")
         saveMedia(body) { answer -> replyProxy.postMessage(answer.put("seq", seq).toString()) }
       }
+      // This phone for the agent of the account signed in here (DeviceTools.kt): the console hands over the
+      // link and says who is signed in; each answer repeats the message's `seq`.
+      DeviceTools.attachConsole(webView)
+      WebViewCompat.addWebMessageListener(webView, "aioDeviceTools", setOf("https://agent.clawpage.ai")) { _, message, _, mainFrame, replyProxy ->
+        if (mainFrame) DeviceTools.fromConsole(message.data) { answer -> replyProxy.postMessage(answer.toString()) }
+      }
     }
   }
   companion object {
@@ -252,6 +259,8 @@ class MainActivity : TauriActivity() {
     enableEdgeToEdge()
     super.onCreate(savedInstanceState)
     receiveAuth(intent)
+    DeviceTools.install(this)
+    DeviceTools.debugLink(intent)
     // Edge to edge, Android no longer shrinks the window for the keyboard, so a focused
     // field could sit under it. The page keeps the whole screen (it pads itself for the
     // status and navigation bars) and gives up the keyboard's height while it is shown.

@@ -173,6 +173,21 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   permissions with `xcrun simctl privacy <udid> grant photos|reminders|calendar ai.clawpage.agent`, though iOS 18
   still asks once for Photos), and `-AIODeviceToolsLinkURL ws://localhost:<port>/api/device-link/connect
   -AIODeviceToolsLinkToken dl_…` links the app to a local control plane without the console.
+- Android as an execution environment (docs/EXEC-ENVS.md): `DeviceTools.kt` links the app to the account
+  signed in here and answers the agent over `wss://agent.clawpage.ai/api/device-link/connect` (kind `android`, OkHttp
+  WebSocket, the one Gradle dependency it adds) while the app is in the foreground; `AIBrowser.kt` is the agent's browser
+  panel over the console and `DeviceFiles.kt` its folder (`Android/data/ai.clawpage.agent/files/AI Files`); see "Android
+  App 的浏览器与文件夹" in `docs/FEATURES.md`. The console's main frame talks to it through the `aioDeviceTools` web
+  message listener (`status`, `account`, `link`, `unlink`; JSON strings with a `seq` the answer repeats); the console
+  has no Android entry that sends `link` yet. The token is in `noBackupFilesDir/device-link.json`. Native strings
+  (panel, confirmation) are in `values*/strings.xml` in five languages (`values-b+zh+Hant` is Traditional Chinese).
+  Debug builds only (`BuildConfig.DEBUG`): `adb -s <emulator> shell am start -n ai.clawpage.agent/.MainActivity --es
+  AIODeviceToolsLinkURL ws://10.0.2.2:<port>/api/device-link/connect --es AIODeviceToolsLinkToken dl_… [--es
+  AIOConfirmSeconds 4]` links the app to a local control plane without the console. The emulator test is
+  `AIO_ANDROID_E2E=1 npx vitest run tests/devices/android.e2e.test.ts` (from the repository root, after the debug build);
+  it dials 10.0.2.2, not `adb reverse`, which dropped the emulator when a screenshot's answer went through it. The
+  debug APK (about 120 MB) needs about 1 GB free on the emulator's `/data`; a full AVD can be started with a data
+  image of its own instead (`emulator -avd <name> -data <path>/userdata-qemu.img -partition-size 8192 -no-snapshot`).
 - Home-screen name: iOS shows Clawpage in English, Spanish and Japanese and 一站 in Chinese
   (`gen/apple/Localization/<lang>.lproj/InfoPlist.strings`, which also localize the permission prompts;
   the base `CFBundleDisplayName` 一站 is in `gen/apple/project.yml`, then `xcodegen generate`); Android Clawpage Agent in
@@ -186,7 +201,7 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   iOS PNGs to opaque RGB (the App Store rejects alpha) and copy them over `src-tauri/icons/ios`
   and `src-tauri/icons/android`.
 
-Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, the Swift sources and their project entries (`AIBrowser`, `DeviceFiles`, `ConsoleOffline`), keyboard, name and icon
+Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, the Swift sources and their project entries (`AIBrowser`, `DeviceFiles`, `ConsoleOffline`), the Kotlin sources (`DeviceTools`, `AIBrowser`, `DeviceFiles`), the OkHttp dependency and the strings, keyboard, name and icon
 `gen/` changes above.
 
 ## Build and run
