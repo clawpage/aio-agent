@@ -27,6 +27,7 @@ import {
   MAIL_SKILL_MD,
   MAIL_TOOL_DIR,
   SHARE_CLI_PY,
+  SHARE_REFERENCES,
   SHARE_SKILL_DIR,
   LEGACY_SHARE_SKILL_DIR,
   SHARE_SKILL_MD,
@@ -394,14 +395,17 @@ export class SandboxContainer {
     const legacy = [`${s.containerCodexHome}/${LEGACY_SHARE_SKILL_DIR}`, `${this.#cfg.claudeCode.configDir}/${LEGACY_SHARE_SKILL_DIR}`];
     try {
       await this.execInSandbox(["rm", "-rf", ...legacy], { timeoutMs: 15_000 });
-      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs], { timeoutMs: 15_000 });
+      const mkdir = await this.execInSandbox(["mkdir", "-p", toolDir, ...skillDirs.map((dir) => `${dir}/references`)], { timeoutMs: 15_000 });
       if (mkdir.code !== 0) throw new Error((mkdir.stderr || mkdir.stdout).trim().slice(0, 200));
       await this.writeFileInSandbox(`${toolDir}/aio-share.py`, SHARE_CLI_PY);
       await this.writeFileInSandbox(`${toolDir}/clawpage-sdk.js`, CLAWPAGE_SDK_JS);
       await this.writeFileInSandbox(`${toolDir}/clawpage-style.css`, CLAWPAGE_STYLE_CSS);
       await this.writeFileInSandbox(`${toolDir}/config.json`, JSON.stringify(share));
       await this.execInSandbox(["chmod", "600", `${toolDir}/config.json`], { timeoutMs: 15_000 });
-      for (const dir of skillDirs) await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);
+      for (const dir of skillDirs) {
+        await this.writeFileInSandbox(`${dir}/SKILL.md`, SHARE_SKILL_MD);
+        for (const [name, text] of Object.entries(SHARE_REFERENCES)) await this.writeFileInSandbox(`${dir}/references/${name}`, text);
+      }
     } catch (err) {
       this.#log.warn("could not seed the sandbox share skill", { error: String(err).slice(0, 200) });
     }

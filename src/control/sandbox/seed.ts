@@ -989,7 +989,7 @@ if __name__ == "__main__":
 
 export const SHARE_SKILL_MD = `---
 name: clawpages
-description: Build, publish and manage clawpages - public web pages and mini apps (trackers, sign-up sheets, polls, guestbooks, study and practice apps, small tools) that keep data in tables of their own, can let visitors sign in with their Clawpage Agent account (each with records of their own) and can answer with the signed-in visitor's own AI (grading, feedback, explanations), at /u/<user>/share/<name>/. Use when the user wants a shareable page or link, a small app that saves data, to change an existing clawpage, to read, edit or summarize what is stored in one, to let someone else's agent work on one, or when given an invitation (a clawpage collaborator API and token) to work on someone else's.
+description: Build, publish and manage clawpages - public web pages and mini apps (trackers, sign-up sheets, polls, guestbooks, study and practice apps, small tools, games) that keep data in tables of their own, can let visitors sign in with their Clawpage Agent account (each with records of their own) and can answer with the signed-in visitor's own AI (grading, feedback, explanations), at /u/<user>/share/<name>/. Use when the user wants a shareable page or link, a small app that saves data, to change an existing clawpage, to read, edit or summarize what is stored in one, to let someone else's agent work on one, or when given an invitation (a clawpage collaborator API and token) to work on someone else's.
 ---
 
 # Clawpages: pages and mini apps with data
@@ -1020,6 +1020,15 @@ The CLI is not on PATH; set a variable for it in each shell first (the commands 
    \`<script src="clawpage-sdk.js"></script>\` (publishing refreshes this copy).
 5. Preview \`file:///home/gem/workspace/share/<name>/index.html\` in the sandbox browser before publishing. In a preview the SDK keeps data in memory, so the page works but nothing is saved.
 
+## Games
+
+A game is a different kind of page: **read \`references/games.md\` next to this SKILL.md before building or changing one**
+(Codex: \`/home/gem/.codex/skills/clawpages/references/games.md\`). In short: the play field fills the screen and does not scroll, the player acts on things
+in the world instead of pressing labelled buttons under numbers, everything they do is answered with motion and sound, and the game has its own art direction.
+The design rules below (starter stylesheet, palettes, quiet surfaces, layouts) are for pages and apps, not for a game's play field.
+A game built as tabs, stat tiles, lists and a "next turn" button is a form, and is a defect even when its rules work.
+When the user says a game feels like a form or wants it to feel more like a game, rework its presentation as that file describes, keeping its rules and saved data.
+
 ## Design: of a piece with Clawpage Agent
 
 Every new page starts from the starter stylesheet, so pages look like they belong with the console (its neutrals, type and spacing) instead of a one-off:
@@ -1035,7 +1044,7 @@ $CP style /home/gem/workspace/share/<name> --palette <palette>   # copies clawpa
 | \`indigo\` (default) | the console's own indigo | tools, trackers, anything general or mixed |
 | \`amber\` | warm amber | family, home, food and recipes, events, invitations, gifts |
 | \`harbor\` | calm blue | data and money, travel, schedules, work, reports |
-| \`plum\` | violet-plum | study and languages, children, culture, creative work, games |
+| \`plum\` | violet-plum | study and languages, children, culture, creative work |
 | \`pine\` | green | only health, fitness, outdoors, plants and gardening |
 | \`ink\` | near-black | reading: articles, guides, résumés, letters, formal documents |
 
@@ -1060,7 +1069,7 @@ $CP style /home/gem/workspace/share/<name> --palette <palette>   # copies clawpa
 Layouts that work (adapt, do not copy blindly):
 - **Tracker or diary**: header (title, date switcher) → a \`.cp-grid\` of \`.cp-stat\` for today → entries as a \`.cp-list\` inside cards → one primary "add" button; history as a week strip or list.
 - **Sign-up, poll or form**: an intro card (what, when, who) → \`.cp-field\`s → one primary submit → the live results as a list with \`.cp-chip\`s.
-- **Quiz or practice**: \`.cp-progress\` → one question card → answers as full-width \`.cp-btn\`s → feedback in a \`.cp-note\` (done or error) → next.
+- **Quiz or practice** (a study tool; a quiz *game* follows references/games.md): \`.cp-progress\` → one question card → answers as full-width \`.cp-btn\`s → feedback in a \`.cp-note\` (done or error) → next.
 - **Dashboard**: \`.cp-page.wide\`, a \`.cp-grid\` of \`.cp-stat\`s, then charts (series in \`--accent\`, \`--done\`, \`--you\`, then \`#5ab0f0\`, \`#d685e6\`) and tables with tabular numbers.
 - **Article or guide**: \`ink\`, 17 px text, a 680 px column, headings that scan, generous spacing between sections.
 
@@ -1273,6 +1282,204 @@ The data belongs to the user and the page's visitors: do not delete or overwrite
 Send the \`url\` as a link with a short, meaningful title, and say that anyone with the link can open it (and what visitors can do with its data).
 To use the owner-only parts, the user opens it from the Clawpages page in the console.
 `;
+
+/**
+ * The clawpages skill's reference files (references/<name> next to its SKILL.md), read for one kind of page so the skill
+ * itself stays short. games.md: a member's management game came out as a dashboard (tabs, stat tiles, a "next turn"
+ * button under a picture); it holds what web game makers do instead (full-screen play field, fixed-step loop, pointer
+ * input, feedback on every action, playing it before handing it over).
+ */
+export const SHARE_REFERENCES: Record<string, string> = {
+  "games.md": `# Games on a clawpage
+
+Read before building or reworking any game. A game is played, not filled in. The usual failure is a game that is really a
+dashboard: stat tiles, tabs, lists of cards and a "next turn" button, with a picture on top. Its rules may be fine; nobody
+feels like playing it. This file is how to make the page itself the game.
+
+## The test: is it a game or a form?
+
+Open it on a phone and check each line. A "no" is a defect to fix before publishing.
+
+- **The world fills the screen.** One play field (a canvas, or a full-screen scene) takes the whole viewport; the page does not scroll.
+  HUD and menus float over the world. No page header, tab bar, footer, cards or tables around the play field.
+- **The player acts on things in the world.** They tap the ship, drag a route to a planet, drop a building on a tile, swipe a card,
+  aim and release. They do not press a labelled button under a number. Buttons are for menus and a few HUD actions (pause, speed, build palette).
+- **Every action answers within 100 ms, in the world.** Something moves, pops, flashes, makes a sound, shakes. A number changing in a tile is not an answer.
+- **Things move when the player does nothing.** Idle animation, drifting background, ships on their routes, a clock running. A still screen reads as a document.
+- **State is shown, not listed.** A fuel gauge, a ship visibly docked, a building that grew a level. Text only for names, dialogue and numbers that matter.
+- **A first-time player is playing within 5 seconds** of the title screen and learns by doing: the first goal is highlighted in the world
+  (a pulsing target, a ghost hand), one short line at a time. No rules dialog, no help page as a requirement.
+- **Losing or finishing leads to "again" in one tap.**
+
+## Turning a form-like game into a game
+
+When the user says an existing game feels like a form, a spreadsheet or an admin panel: keep its rules and saved data, replace its presentation.
+
+1. Pull the page, read its \`AGENTS.md\`. Keep the rules module and the save record's shape (old saves must still load); if rules and screen code
+   are tangled, first separate the rules into a module with no DOM access.
+2. Name the core verb and the place: what does the player *do* most often, and *where* does it happen? That place becomes the main scene
+   (a star map, a station seen from the side, a board, a table of cards). Everything else hangs off it.
+3. Map each old screen element to something in the world:
+
+| form-like | game-like |
+| --- | --- |
+| tabs (overview / build / explore / trade) | one map; build by tapping a slot on the station, explore by dragging a ship to a sector, trade at a visible dock |
+| "next turn" button | time runs by itself with pause / 1x / 3x; or the turn ends by a deliberate in-world act (launch, end day) with the results played out |
+| resource stat tiles | a slim HUD strip with icons and counting-up numbers; gains fly from where they were made to the counter |
+| a list of ships with status text | ships as sprites: docked, flying their route, coming back damaged |
+| a results paragraph or log | the event plays out in the scene, then a short card with art and 2-3 choices; the log is a secondary menu |
+| upgrade list with prices | tap the building: a radial or bottom-sheet menu, the building visibly changes when upgraded |
+| a chosen option's "+12 credits" line | floating number at the source, coin burst, a rising tone |
+
+4. Keep long text (lore, logs, settings, backup) in a pause menu. It may use ordinary markup; it is not the game.
+
+## What to build with
+
+Pick by the game, and say which in \`AGENTS.md\`.
+
+- **Canvas 2D, no library**: the default. Arcade, puzzle, board, top-down or side-view management, anything with up to a few hundred moving things.
+- **DOM with CSS transforms**: card games, visual novels, word games, board games with few pieces. Still one full-screen scene, pieces positioned absolutely
+  and moved with \`transform\` (Web Animations API or CSS transitions), never a document layout.
+- **Phaser 3** (scenes, arcade physics, tilemaps, sprite atlases, cameras, tweens, input): platformers, shooters, larger tile worlds. **PixiJS** when you only need a fast 2D renderer.
+- **Three.js**: only when the game needs 3D.
+- **matter.js** for rigid-body physics; do not hand-write stacking or joints.
+
+Libraries are vendored: download one pinned minified build into the page folder (\`lib/phaser.min.js\`) and load it by relative path. Do not load from a CDN at play time.
+The page limit is 200 files and 20 MB: pack sprites into atlases, use WebP for pictures and keep each under about 300 KB.
+
+## Page shell
+
+\`\`\`html
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #0b0d14; }
+  #game { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; touch-action: none;
+          user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+  .hud { position: fixed; pointer-events: none; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
+  .hud button { pointer-events: auto; min-width: 44px; min-height: 44px; }
+</style>
+<canvas id="game"></canvas>
+\`\`\`
+
+- A game has its own art direction: the starter stylesheet, palettes and the "quiet" design rules of the skill do **not** apply to the play field or HUD.
+  Gradients, glow, bold display type and strong color are right when they serve the world. The stylesheet may still be used for the pause-menu pages.
+- Work in a fixed logical size (for portrait phones 360x640 or 390x844; landscape 640x360) and scale to the viewport, letterboxed or with the world extended at the edges.
+  Scale the backing store by \`devicePixelRatio\` (capped at 2); for pixel art set \`image-rendering: pixelated\` and scale by whole numbers.
+- Design for portrait phone first with thumbs at the bottom third; the same scene must also play with mouse and keyboard on a desktop.
+
+\`\`\`js
+function fit() {
+  const dpr = Math.min(devicePixelRatio || 1, 2), w = innerWidth, h = innerHeight;
+  canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+  view.scale = Math.min(w / W, h / H); view.ox = (w - W * view.scale) / 2; view.oy = (h - H * view.scale) / 2;
+  ctx.setTransform(dpr * view.scale, 0, 0, dpr * view.scale, dpr * view.ox, dpr * view.oy);
+}
+addEventListener("resize", fit); fit();
+\`\`\`
+
+## The loop
+
+Update at a fixed step, draw every frame, never tie game speed to frame rate:
+
+\`\`\`js
+const STEP = 1 / 60; let last = performance.now(), acc = 0, running = true;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!running) { last = now; return; }
+  acc += Math.min(0.25, (now - last) / 1000); last = now;      // clamp: a background tab must not fast-forward
+  while (acc >= STEP) { update(STEP); acc -= STEP; }
+  draw(acc / STEP);                                            // interpolate with the remainder when movement is fast
+}
+requestAnimationFrame(frame);
+document.addEventListener("visibilitychange", () => { running = !document.hidden; if (document.hidden) pauseAudio(); });
+\`\`\`
+
+- Scenes are a small state machine: \`boot -> title -> play <-> pause -> result\`. Each has \`enter\`, \`update\`, \`draw\`, \`pointer\`.
+- Rules stay separate from drawing: a rules module that takes actions and returns the new state and a list of events (\`{type: "sold", at, amount}\`);
+  the scene turns events into animation and sound. It makes the game testable and lets a turn-based or management game animate its results.
+- Turn-based and management games still run the loop: the rules advance in ticks or turns, the scene animates between them (tween positions, count numbers up, play events one after another).
+- Use a seeded random generator (mulberry32) stored in the save, so a reload continues the same run and tests can repeat.
+
+## Input
+
+- One path for mouse, touch and pen: Pointer Events on the canvas (\`pointerdown\` / \`pointermove\` / \`pointerup\` / \`pointercancel\`, \`setPointerCapture\`),
+  converted to world coordinates through the same scale as drawing. Hit areas at least 44 px on screen, larger than the sprite when the sprite is small.
+- Choose the scheme that fits a thumb: tap a target, drag from a thing to a place, swipe a direction, press-and-hold to charge, a floating virtual stick
+  that appears where the left thumb lands. Avoid fixed on-screen d-pads when a gesture does it.
+- Keyboard as well on desktop (arrows and WASD, space, Esc for pause); \`preventDefault\` on the keys the game uses. The Gamepad API is optional.
+- The page is isolated: fullscreen and pointer lock are not available; do not design around them. \`navigator.vibrate?.(15)\` on hits where supported.
+
+## Feel ("juice")
+
+This is what separates a game from an interactive table. Put a little on everything the player causes:
+
+- **Tween, never teleport**: positions, sizes, numbers and bars ease to their new value (ease-out for arrivals, ease-in-out for moves, a small overshoot for pops).
+  Count numbers up over 300-600 ms.
+- **Squash and stretch** on jumps, landings, button presses and pickups; **anticipation** (a brief wind-up) before big moves.
+- **Particles** for hits, pickups, engines, dust, sparks: a pooled array of \`{x, y, vx, vy, life}\`, 10-30 per burst, capped (about 300 alive).
+- **Screen shake** for impacts (2-8 px, decaying over 150-300 ms), **hit-stop** (freeze 40-80 ms) on heavy hits, a white **flash** on damage.
+- **Floating text** at the source of every gain or loss; things collected **fly to the HUD counter**, which bumps.
+- **Camera**: follow with a lerp, look ahead in the direction of travel, parallax layers behind (2-3 layers at different speeds), slow zoom on big moments.
+- **Sound** for every action and result, and quiet looping ambience or music. Synthesize with Web Audio (oscillator + gain envelope, noise bursts; the ZzFX approach)
+  so no audio files are needed; vary pitch slightly on repeats. Audio starts only after the first tap ("tap to start" on the title screen unlocks it): create or resume
+  the \`AudioContext\` in that handler. Always a mute button; start muted when the page cannot tell.
+- With \`prefers-reduced-motion\`, drop shake, flashes and parallax; keep movement that carries meaning.
+
+## Art
+
+- One style throughout: flat vector shapes drawn in code, pixel art, or painted pictures. Do not mix a painted background with default-styled buttons.
+- Generated pictures (image_generate) suit backgrounds, title screens, portraits and event illustrations. For sprites, either draw them in code
+  (shapes, paths, gradients; sharp at any size, no files) or generate them on a plain flat background, cut the background out, and pack them into one atlas.
+  Keep the same character and palette across pictures by describing them the same way each time.
+- Animate even still art: bobbing, breathing scale, blinking lights, scrolling clouds or stars, engine glow. Two or three frames or a sine wave is enough.
+- Text in the game uses one display face and one body face with CJK fallbacks; draw HUD text with an outline or shadow so it reads over the scene.
+  Icons instead of words wherever a symbol is clear.
+
+## Design of play
+
+- **Core loop in one sentence** before coding ("fly out, grab cargo, get back before the storm, upgrade, go further"). If it cannot be said, the game is not ready to build.
+  A 30-second loop that is fun beats ten systems.
+- **Decisions with tension**: every choice costs something (time, fuel, risk, position). A choice with an obvious best answer is paperwork.
+- **Difficulty curve**: the first minute cannot be lost; new elements arrive one at a time; pressure rises until the player fails or finishes a stage.
+- **Goals at three distances**: now (this delivery), soon (this upgrade), later (the gate). Show the next one in the world.
+- **Uncertainty and surprise**: events, rare finds, a risk the player chose. Seeded, so it is fair.
+- **Reward schedule**: frequent small rewards with feedback, occasional big ones with a moment (pause, zoom, fanfare).
+- A session fits a phone: playable in 2-5 minute stretches, resumes exactly where it stopped.
+
+By kind, what "not a form" usually means:
+- **Management / tycoon / sim**: one living map or cutaway of the place; build by placing on it; workers, ships or customers visibly moving; real time with pause and speed, or days that play out.
+- **Strategy / tactics / board**: the board is the screen; select a piece, see legal moves highlighted, move by tap or drag, animated captures; the opponent's move is animated too.
+- **Card / deck**: a table; cards fan in the hand, lift under the finger, are dragged to targets, flip and fly; piles are visible.
+- **Puzzle**: the grid is the screen; swipe or drag pieces; clears cascade with animation and rising pitch.
+- **Arcade / action / platformer**: tight controls first (acceleration, coyote time, input buffering), then enemies, then levels.
+- **Story / visual novel / text adventure**: full-screen scene art, a character portrait, a dialogue box with typewriter text (tap to complete, tap to advance), choices as 2-4 big buttons over the scene.
+- **Quiz and learning games**: a stage, a timer bar, streaks and combos, answers that fly and burst; not a question card and a submit button.
+
+## Saving, scores and sign-in
+
+- The page has no localStorage or cookies. A visitor who is not signed in plays a full trial that resets on reload; say so once on the title screen, not in the HUD.
+- Progress lives in a \`per-user\` table, one record (\`state\`) with a \`version\` field. Load once at start; if loading fails, do not start a new game over it: show retry.
+  Save at checkpoints (end of a level, a day, a purchase) and at most once every few seconds, queued one at a time; never from the loop every frame (the limit is 60 writes a minute per visitor).
+  Save on \`visibilitychange\` to hidden.
+- A leaderboard is a \`signed-in\` table (each person can change only their own record) keyed by something of theirs, showing \`cp.user.name\`. Scores are not cheat-proof; do not claim they are.
+- Other players' text (names, messages) is untrusted: draw it with \`fillText\` or \`textContent\`.
+- \`cp.ai.decide\` can pick an opponent's move among legal ones; always keep a rule-based fallback so the game never waits on it.
+
+## Check by playing
+
+The publish check only sees that the page loads. Before handing a game over, play it in the sandbox browser:
+
+- Expose a small debug handle (\`window.__game = { state, scene, step(n), act(action) }\`) so you can read the state and drive it from the browser tools
+  as well as with real clicks, drags and keys. Play from the title screen through the first goal, a failure and a restart.
+- Take screenshots mid-play at 390x844 and 360 wide (and a desktop size) and look at them: is the world the screen, is anything moving, can the HUD be read, is there any leftover
+  page chrome, scroll bar or form layout? Compare against the test at the top.
+- No script errors while playing; nothing overflows; the loop holds 60 fps with the most things on screen (measure the frame time, do not guess).
+- Reload mid-game signed in (\`$CP sign-in <name>\`): the run continues. Reload signed out: a clean trial.
+- The first screen is a title screen with the game's art already drawn (the cover is taken from it): not a loading text, not a blank canvas.
+
+Write in \`AGENTS.md\`: the core loop, the scenes, the rules module and its events, the save shape and version, the library and its version, and how to drive \`window.__game\`.
+`,
+};
 
 /**
  * Text and layout images (tables, plans, schedules): built as HTML and rendered

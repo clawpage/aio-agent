@@ -2,7 +2,7 @@ import { CLAWPAGE_SDK_JS } from "../../src/control/sandbox/clawpageSdk.js";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { SandboxContainer } from "../../src/control/sandbox/container.js";
-import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, PHOTO_CLI_PY, PHOTO_REFERENCES, PHOTO_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
+import { CODEX_CONFIG_TOML, DOCUMENT_SKILL_DIR, DOCUMENT_SKILL_MD, GRAPHIC_RENDER_PY, GRAPHIC_SKILL_MD, MAIL_BINARIES, MARKET_CLI_PY, MARKET_SKILL_MD, PHOTO_CLI_PY, PHOTO_REFERENCES, PHOTO_SKILL_MD, MAIL_INSTALL_SH, MAIL_RO_SH, MAIL_SETUP_PY, MAIL_SKILL_MD, SHARE_CLI_PY, SHARE_REFERENCES, SHARE_SKILL_MD, WORKSPACE_AGENTS_BEGIN, WORKSPACE_AGENTS_END, WORKSPACE_AGENTS_MD, refreshWorkspaceAgents } from "../../src/control/sandbox/seed.js";
 import { Logger } from "../../src/common/logger.js";
 import { testConfig, testNode } from "../helpers/harness.js";
 
@@ -156,6 +156,13 @@ describe("sandbox workspace seed", () => {
     const check = SHARE_SKILL_MD.slice(SHARE_SKILL_MD.indexOf("also prints a **check**"));
     expect(check).toMatch(/if it does, the table is private, which visitors cannot see: change the page to read that table only when `cp\.owner`/);
     expect(check).toContain("**Never loosen a private table's permission just to pass the check.**");
+    // A game came out as a dashboard (tabs, stat tiles, a "next turn" button): the skill sends games to their own reference, beside it for both executors.
+    expect(SHARE_SKILL_MD).toContain("**read \`references/games.md\` next to this SKILL.md before building or changing one**");
+    expect(SHARE_SKILL_MD).toContain("are for pages and apps, not for a game's play field");
+    for (const s of skills) expect(calls.find((c) => c.path === s.path.replace("SKILL.md", "references/games.md"))?.content).toBe(SHARE_REFERENCES["games.md"]);
+    expect(execCalls.some((argv) => argv[0] === "mkdir" && argv.includes(`${cfg.sandbox.containerCodexHome}/skills/clawpages/references`) && argv.includes(`${cfg.claudeCode.configDir}/skills/clawpages/references`))).toBe(true);
+    expect(SHARE_REFERENCES["games.md"]).toContain("## Turning a form-like game into a game");
+    expect(SHARE_REFERENCES["games.md"]).toContain("window.__game");
     // The skill's earlier name goes, so the executor never sees both.
     expect(execCalls).toContainEqual(["rm", "-rf", `${cfg.sandbox.containerCodexHome}/skills/aio-share`, `${cfg.claudeCode.configDir}/skills/aio-share`]);
     expect(calls.some((c) => c.path.includes("/skills/aio-share/"))).toBe(false);
