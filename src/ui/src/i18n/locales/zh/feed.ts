@@ -87,6 +87,7 @@ export const feed = {
     writing: "正在回复",
   },
   scheduleRun: (title: string, rule: string) => `定时任务「${title}」自动运行 · ${rule} · `,
+  schedulePaused: (n: number) => `这个定时任务连续 ${n} 次没有完成，已自动暂停，不再消耗用量。可在「定时任务」页修改要求后恢复。`,
   supportNote: "客服发来的消息 · ",
   handBackNote: "你交还了浏览器，任务自动继续 · ",
   handBackSummary: "你交还了浏览器，任务自动继续",

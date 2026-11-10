@@ -259,11 +259,16 @@ export function notificationText(text: string | null | undefined, max = 140): st
   return chars.length > max ? chars.slice(0, max - 1).join("") + "…" : plain;
 }
 
-type TaskView = { id: string; title: string; status: string; result: string | null; error: string | null; clarification: string | null; schedule?: { builtin?: string } | null };
+type TaskView = { id: string; title: string; status: string; result: string | null; error: string | null; clarification: string | null; schedule?: { title?: string; builtin?: string; autoPaused?: number } | null };
 
 /** What a task's news looks like on the phone, in the account's language, or null for news that is not worth a notification. */
 export function taskNotification(task: TaskView, locale: Locale): PushPayload | null {
   const m = t(locale).http.push;
+  // The run that made its schedule pause itself says that, with why this run did not finish.
+  if (task.schedule?.autoPaused) {
+    const why = notificationText(task.status === "needs_input" ? task.clarification : task.error, 90) || (task.status === "needs_input" ? m.needsInputBody : task.status === "unknown" ? m.unknownBody : m.failedBody);
+    return { title: m.schedulePaused(task.schedule.title ?? task.title), body: m.schedulePausedBody(task.schedule.autoPaused, why), tag: task.id };
+  }
   // The daily feed reads as what it is; its first line ("今日为你留意", or the heading in the account's language) is the title already.
   if (task.schedule?.builtin === "daily_feed") {
     if (task.status !== "completed") return null;

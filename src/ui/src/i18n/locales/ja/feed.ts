@@ -87,6 +87,7 @@ export const feed: typeof zh = {
     writing: '返信中',
   },
   scheduleRun: (title: string, rule: string) => `定期タスク「${title}」の自動実行 · ${rule} · `,
+  schedulePaused: (n: number) => `この定期タスクは ${n} 回続けて完了しなかったため、自動で一時停止しました。これ以上の利用量はかかりません。「定期タスク」ページで依頼内容を直してから再開できます。`,
   supportNote: 'サポートからのメッセージ · ',
   handBackNote: 'ブラウザを返却したので、タスクを自動で再開します · ',
   handBackSummary: 'ブラウザを返却したので、タスクを自動で再開します',

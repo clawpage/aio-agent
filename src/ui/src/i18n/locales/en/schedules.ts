@@ -18,6 +18,8 @@ export const schedules: typeof zh = {
     learnedFromFeedback: " · Learned from your feedback",
     runCount: (n: number) => `Ran ${n} time${n === 1 ? "" : "s"}`,
     lastRun: (status: string) => `Last: ${status}`,
+    autoPaused: (n: number) => `Paused automatically: it did not finish ${n} times in a row, and uses nothing more. Check the last result, fix the request, then resume.`,
+    failures: (n: number) => `Did not finish the last ${n} times`,
     started: (title: string) => `"${title}" has started. The result will show up in the main chat.`,
     loadFailed: "Couldn't load",
     actionFailed: "Action failed",

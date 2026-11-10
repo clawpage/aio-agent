@@ -17,6 +17,8 @@ export const schedules: typeof zh = {
     feedMore: (n: number) => (n ? `仕組みと覚えていること ${n} 件` : '仕組み'),
     learnedFromFeedback: ' · フィードバックから学習',
     runCount: (n: number) => `${n} 回実行済み`,
+    autoPaused: (n: number) => `${n} 回続けて完了しなかったため、自動で一時停止しました。これ以上の利用量はかかりません。前回の結果を確認し、依頼内容を直してから再開してください。`,
+    failures: (n: number) => `直近 ${n} 回続けて未完了`,
     lastRun: (status: string) => `前回：${status}`,
     started: (title: string) => `「${title}」を実行しました。結果はメインチャットに届きます。`,
     loadFailed: '読み込めませんでした',

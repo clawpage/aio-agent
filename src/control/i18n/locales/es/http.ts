@@ -103,6 +103,8 @@ export const http: typeof zh = {
     unknownBody: "Se perdió la conexión; revisa el resultado.",
     needsInput: (title: string) => `Necesita tu información: ${title}`,
     needsInputBody: "Abre Clawpage Agent para añadir los datos.",
+    schedulePaused: (title: string) => `Tarea programada en pausa: ${title}`,
+    schedulePausedBody: (n: number, why: string) => `No terminó ${n} veces seguidas, así que está en pausa y no consume más. La última vez: ${why}`,
     approval: (title: string) => `Necesita tu confirmación: ${title}`,
     approvalBody: "Hay una acción esperando tu confirmación. Abre Clawpage Agent para verla.",
     browser: (title: string) => `Te necesita en el navegador: ${title}`,

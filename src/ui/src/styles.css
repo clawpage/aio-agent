@@ -4615,6 +4615,10 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .task-list-item.schedule-item:hover { border-color: var(--border); }
 .schedule-rule { margin: 2px 0 0; font-size: 14px; font-weight: 600; color: var(--text); }
 .schedule-item .task-list-summary { margin: 6px 0 0; line-height: 1.5; }
+/* The schedule's own mark: runs that keep ending unfinished, and the pause that follows (the person's turn). */
+.schedule-failing { margin: 6px 0 0; line-height: 1.5; }
+.schedule-failing.paused, .schedule-paused-note { color: var(--you); }
+.schedule-paused-note { margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
 /* The daily feed's explanation and what it remembers: folded to a line of counts. */
 .schedule-feed-more { margin: 6px 0 0; }
 .schedule-feed-more summary { font-size: var(--fs-xs); color: var(--text-dim); }

@@ -219,7 +219,7 @@ export interface Task {
   /** The page its agent works in on the account's own Chrome (a linked Mac), and who drives it. */
   userBrowser?: UserBrowserState;
   /** Set on a run a schedule started (nobody typed it then). */
-  schedule?: { id: string; title: string; rule: string; builtin?: string } | null;
+  schedule?: { id: string; title: string; rule: string; builtin?: string; /** On the run after which the schedule paused itself: how many runs in a row did not finish. */ autoPaused?: number } | null;
   /** A message from the people running this deployment, not something the person typed. */
   support?: boolean;
   /** Sent by handing the browser back to a task waiting for you (it carried on by itself), not something the person typed. */
@@ -293,6 +293,10 @@ export interface Schedule {
   condition?: { language: "bash" | "python" | "node"; code: string } | null;
   /** How the condition's last check went. */
   lastCheck?: { at: number; result: "fired" | "skipped" | "error"; error?: "timeout" | "exit" | "unavailable"; exitCode?: number; output?: string } | null;
+  /** How many of its latest runs in a row ended unfinished. */
+  failures?: number;
+  /** "failures" when it paused itself after too many unfinished runs in a row. */
+  pausedFor?: string | null;
   /** Set on a schedule every account gets (the daily feed): it can be paused, not deleted. */
   builtin?: string | null;
   /** The daily feed only: whether the person worded its instruction, and what it keeps in mind. */

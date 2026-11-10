@@ -84,6 +84,9 @@ export function ScheduleList({ active, onExpired, onOpenTask }: { active: boolea
               {s.lastCheck?.output && <pre className="schedule-condition-code muted">{s.lastCheck.output}</pre>}
             </details>
           </div>}
+          {s.pausedFor === "failures"
+            ? <p className="schedule-failing paused tiny" role="note">{t.schedules.list.autoPaused(Math.max(s.failures ?? 0, 3))}</p>
+            : s.status === "active" && !!s.failures && <p className="schedule-failing muted tiny" role="note">{t.schedules.list.failures(s.failures)}</p>}
           <p className="task-list-summary">{s.feed?.customized ? <span className="schedule-feed-label">{t.schedules.list.yourRequest}</span> : null}{s.instruction}</p>
           {s.builtin === "daily_feed" && <details className="schedule-feed-more">
             <summary><span>{t.schedules.list.feedMore(s.feed?.memory.length ?? 0)}</span>{(["care", "avoid", "note"] as const).map((kind) => {

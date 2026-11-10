@@ -86,6 +86,7 @@ export const feed: typeof zh = {
     writing: "Writing the reply",
   },
   scheduleRun: (title: string, rule: string) => `Scheduled task "${title}" ran automatically · ${rule} · `,
+  schedulePaused: (n: number) => `This scheduled task did not finish ${n} times in a row, so it paused itself and uses nothing more. Change the request on the Scheduled tasks page, then resume it.`,
   supportNote: "A message from support · ",
   handBackNote: "You handed the browser back, so the task carried on · ",
   handBackSummary: "You handed the browser back, so the task carried on",

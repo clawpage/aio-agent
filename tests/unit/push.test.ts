@@ -90,6 +90,9 @@ describe("phone notifications", () => {
     expect(taskNotification({ ...base, status: "needs_input", clarification: "要哪个配置？" }, "zh-CN")!.title).toBe("需要你补充：查 Mac Studio 价格");
     expect(taskNotification({ ...base, status: "failed", error: "网站打不开" }, "zh-CN")!.body).toBe("网站打不开");
     expect(taskNotification({ ...base, status: "running" }, "zh-CN")).toBeNull();
+    // The run that made its schedule pause itself says that, and why it did not finish.
+    expect(taskNotification({ ...base, status: "failed", error: "网站打不开", schedule: { title: "盯价格", autoPaused: 3 } }, "zh-CN"))
+      .toMatchObject({ title: "定时任务已暂停：盯价格", body: "连续 3 次没有完成，已自动暂停，不再消耗用量。最近一次：网站打不开" });
     // In the account's language, whatever language the code runs in.
     expect(taskNotification({ ...base, status: "unknown" }, "en")).toEqual({ title: "Result needs checking: 查 Mac Studio 价格", body: "The connection was lost; please check the result.", tag: "t1" });
     expect(runInLocale("en", () => taskNotification({ ...base, status: "completed" }, "es"))!.title).toBe("Terminada: 查 Mac Studio 价格");

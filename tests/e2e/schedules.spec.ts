@@ -273,3 +273,28 @@ test("a daily feed that has learnt a lot stays compact, so the other schedules f
   await page.screenshot({ path: info.outputPath(`schedules-feed-open-${page.viewportSize()!.width}.png`) });
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 });
+
+test("a schedule that paused itself after three unfinished runs says so on its card and on that run", async ({ page }, info) => {
+  const failed = { ...run, status: "failed", result: null, error: "网站要求登录，没有读到价格。", schedule: { ...run.schedule, autoPaused: 3 } };
+  await mockConsole(page, { conversations: [] });
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [failed], nextBefore: null } }));
+  await mockTaskList(page, () => [failed]);
+  await page.route("**/api/schedules", (r) => r.fulfill({ json: { schedules: [
+    schedule({ status: "paused", pausedFor: "failures", failures: 3, nextRunText: null, lastTask: { id: "task-run", status: "failed" } }),
+    schedule({ id: "sched-2", title: "价格监控", rule: "每 2 小时", failures: 2, lastTask: { id: "task-run", status: "failed" } }),
+  ] } }));
+  await page.goto("/");
+  const note = page.locator(".task-report .schedule-paused-note");
+  await expect(note).toContainText("连续 3 次没有完成，已自动暂停", { timeout: 60_000 });
+  await page.screenshot({ path: info.outputPath("schedule-paused-run.png") });
+  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "定时任务", exact: true }).click();
+  const list = page.getByRole("region", { name: "定时任务" });
+  const paused = list.locator('[data-schedule-id="sched-1"]');
+  await expect(paused.locator(".task-status-badge")).toHaveText("已暂停");
+  await expect(paused.locator(".schedule-failing")).toContainText("连续 3 次没有完成，已自动暂停，不再消耗用量");
+  await expect(paused.getByRole("button", { name: "恢复" })).toBeVisible();
+  await expect(list.locator('[data-schedule-id="sched-2"] .schedule-failing')).toHaveText("最近连续 2 次没有完成");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: info.outputPath("schedule-paused-card.png") });
+});

@@ -16,6 +16,8 @@ export const schedules = {
     learnedFromFeedback: " · 从你的反馈学到",
     runCount: (n: number) => `已运行 ${n} 次`,
     lastRun: (status: string) => `上次：${status}`,
+    autoPaused: (n: number) => `连续 ${n} 次没有完成，已自动暂停，不再消耗用量。看看上次的结果，改好要求后再恢复。`,
+    failures: (n: number) => `最近连续 ${n} 次没有完成`,
     started: (title: string) => `「${title}」已开始运行，结果会出现在主会话。`,
     loadFailed: "读取失败",
     actionFailed: "操作失败",

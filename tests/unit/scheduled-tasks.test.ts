@@ -205,4 +205,35 @@ describe("running schedules", () => {
     expect(tasks.listSchedules("owner_1")).toMatchObject([{ title: "每日天气提醒", rule: "Every day at 08:00", status: "active", lastTask: { id: task.id } }]);
     expect(tasks.listSchedules("someone_else")).toEqual([]);
   });
+
+  it("pauses itself after three runs in a row end unfinished, says so on that run, and counts afresh once resumed", async () => {
+    const id = schedules()[0]!.id;
+    const told: Array<{ status: string; schedule?: { autoPaused?: number } | null }> = [];
+    tasks.setNotifier((task) => told.push(task));
+    const run = async (status: string) => {
+      due(id); fire(); await tick();
+      codex.completeTurn(codex.startedTurns.at(-1)!.turnId, status);
+      await tick();
+    };
+    const mark = () => tasks.listSchedules("owner_1")[0]!;
+    // A finished run in between starts the count again.
+    await run("failed"); await run("failed");
+    expect(mark()).toMatchObject({ status: "active", failures: 2, pausedFor: null });
+    await run("completed");
+    expect(mark()).toMatchObject({ status: "active", failures: 0 });
+    await run("failed"); await run("failed");
+    expect(told.every(n => !n.schedule?.autoPaused)).toBe(true);
+    await run("failed");
+    expect(mark()).toMatchObject({ status: "paused", failures: 3, pausedFor: "failures", runCount: 6 });
+    expect(told.at(-1)).toMatchObject({ status: "failed", schedule: { autoPaused: 3 } });
+    // Paused: nothing more starts, nothing more is used.
+    const turns = codex.startedTurns.length;
+    due(id); fire(); await tick();
+    expect(codex.startedTurns.length).toBe(turns);
+    // Resumed by the person: the earlier runs no longer count, and the mark is gone.
+    tasks.changeSchedule(id, "owner_1", "resume");
+    expect(mark()).toMatchObject({ status: "active", failures: 0, pausedFor: null });
+    await run("failed");
+    expect(mark()).toMatchObject({ status: "active", failures: 1, pausedFor: null });
+  });
 });

@@ -82,6 +82,10 @@ interface ScheduleRow {
     condition_json: string | null;
     /** The last ConditionCheck. */
     last_check_json: string | null;
+    /** Set when the schedule paused itself: 'failures' after SCHEDULE_MAX_FAILURES unfinished runs in a row. */
+    paused_for: string | null;
+    /** Runs started before this (the last resume or change) no longer count as unfinished ones in a row. */
+    streak_from: number;
 }
 /** The built-in daily feed: a schedule every account gets. */
 const DAILY_FEED = "daily_feed";
@@ -128,6 +132,10 @@ const FEED_EMPTY = /<!--\s*feed-empty\s*-->/;
 const FEED_MARKERS = /\s*<!--\s*feed-(?:topics:[\s\S]*?|empty\s*)-->\s*/g;
 /** An account nobody opened for this long has all its schedules paused when the next one is due. */
 const SCHEDULES_IDLE_PAUSE_MS = 14 * 86_400_000;
+/** A schedule whose runs end unfinished this many times in a row pauses itself, so it stops using tokens on work that cannot be done. */
+export const SCHEDULE_MAX_FAILURES = 3;
+/** A run that ended without doing its work: it failed, nobody knows how it ended, or it stopped to ask a person who is not there. */
+const RUN_UNFINISHED = new Set(["failed", "unknown", "needs_input"]);
 /** How often due schedules are checked; a run starts at most this late. */
 const SCHEDULE_TICK_MS = 30_000;
 /** A previous run in one of these states no longer holds the next one back. */
@@ -344,7 +352,10 @@ export class TaskService {
     /** Tell the notifier about a status this task just reached, if it is news for the person. */
     private notifyChange(id: string, before: string): void {
         const row = this.get(id);
-        if (!row || row.status === before || row.merged_into || !this.#notifier) return;
+        if (!row || row.status === before || row.merged_into) return;
+        // Before the news goes out: a run that tips its schedule into a pause is told as that.
+        if (row.schedule_id) this.pauseIfFailing(row.schedule_id);
+        if (!this.#notifier) return;
         // A daily feed with nothing to say stays silent on the phone.
         if (row.schedule_id && FEED_EMPTY.test(row.result ?? "") && this.scheduleRow(row.schedule_id)?.builtin === DAILY_FEED) return;
         // The gadget speaks its own answers; the phone stays quiet.
@@ -386,7 +397,7 @@ export class TaskService {
             options: row.status === "needs_input" ? plan?.options ?? null : null,
             form: row.status === "needs_input" ? plan?.form ?? null : null,
             dependencies: plan?.dependencies ?? [], createdAt: row.created_at, startedAt: turn?.started_at ?? null, completedAt: row.completed_at,
-            schedule: row.schedule_id ? (s ? this.scheduleLabel(s) : { id: row.schedule_id, title: row.title, rule: t().tasks.schedules.deleted }) : null,
+            schedule: row.schedule_id ? (s ? this.scheduleLabel(s, row) : { id: row.schedule_id, title: row.title, rule: t().tasks.schedules.deleted }) : null,
             // A support card (support.ts): nobody typed it, so the console shows a support note instead.
             support: isSupportCard(row.client_message_id),
             // Sent by handing the browser back (continueAfterHandBack): the console shows a note, not the person's message.
@@ -1336,8 +1347,24 @@ export class TaskService {
         return (this.db.prepare("SELECT * FROM schedules WHERE owner_id=? AND status IN ('active','paused') ORDER BY created_at").all(ownerId) as unknown as ScheduleRow[])
             .map(s => ({ id: s.id, title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), status: s.status, instruction: s.instruction.slice(0, 400) }));
     }
-    private scheduleLabel(s: ScheduleRow): { id: string; title: string; rule: string; builtin?: string } {
-        return { id: s.id, title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), ...(s.builtin ? { builtin: s.builtin } : {}) };
+    private scheduleLabel(s: ScheduleRow, run?: TaskRow): { id: string; title: string; rule: string; builtin?: string; autoPaused?: number } {
+        // On the run that tipped it over: the schedule paused itself after this many unfinished runs in a row.
+        const autoPaused = run && s.status === "paused" && s.paused_for === "failures" && s.last_task_id === run.id && RUN_UNFINISHED.has(run.status);
+        return { id: s.id, title: this.scheduleTitle(s), rule: describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec), ...(s.builtin ? { builtin: s.builtin } : {}), ...(autoPaused ? { autoPaused: SCHEDULE_MAX_FAILURES } : {}) };
+    }
+    /** How many of the schedule's latest runs in a row ended unfinished, since it was last resumed or changed. */
+    private scheduleFailures(s: ScheduleRow): number {
+        const runs = this.db.prepare("SELECT status FROM tasks WHERE schedule_id=? AND created_at>=? AND merged_into IS NULL ORDER BY created_at DESC LIMIT ?")
+            .all(s.id, s.streak_from, SCHEDULE_MAX_FAILURES) as Array<{ status: string }>;
+        const finished = runs.findIndex(r => !RUN_UNFINISHED.has(r.status));
+        return finished < 0 ? runs.length : finished;
+    }
+    /** Pause a schedule whose runs keep ending unfinished; whether it is paused for that now. */
+    private pauseIfFailing(id: string): boolean {
+        const s = this.scheduleRow(id);
+        if (!s || s.status !== "active" || this.scheduleFailures(s) < SCHEDULE_MAX_FAILURES) return false;
+        this.db.prepare("UPDATE schedules SET status='paused',paused_for='failures',updated_at=? WHERE id=?").run(Date.now(), id);
+        return true;
     }
     /** A schedule's name as people read it: the built-in feed's (which nobody renames) is in their language. */
     private scheduleTitle(s: ScheduleRow): string {
@@ -1641,8 +1668,9 @@ export class TaskService {
                 status = "active";
             }
         }
-        this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,condition_json=?,last_check_json=?,updated_at=? WHERE id=?")
-            .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, condition, lastCheck, now, s.id);
+        // A changed schedule starts over: earlier unfinished runs no longer count against it.
+        this.db.prepare("UPDATE schedules SET title=?,instruction=?,spec_json=?,resources_json=?,status=?,next_run_at=?,run_count=?,condition_json=?,last_check_json=?,paused_for=?,streak_from=?,updated_at=? WHERE id=?")
+            .run(title, instruction, JSON.stringify(spec), resources, status, status === "done" ? null : next, runCount, condition, lastCheck, status === "paused" ? s.paused_for : null, now, now, s.id);
         const tz = s.timezone;
         const when = status === "paused" ? words.updatedPaused : status === "done" ? words.updatedDone : words.updatedNext(formatWhen(next!, tz));
         return { ok: true, message: [words.updated(title, describeSchedule(spec), tz, when), words.eachRun(instruction), ...(condition ? [words.conditional] : [])].join("\n\n"), schedule: this.viewSchedule(this.scheduleRow(s.id)!) };
@@ -1655,7 +1683,7 @@ export class TaskService {
         const now = Date.now();
         const title = this.scheduleTitle(s);
         if (action === "cancel" && s.builtin) {
-            this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
+            this.db.prepare("UPDATE schedules SET status='paused',paused_for=NULL,updated_at=? WHERE id=?").run(now, id);
             return words.builtinClosed(title);
         }
         if (action === "cancel") {
@@ -1663,15 +1691,16 @@ export class TaskService {
             return words.cancelled(title);
         }
         if (action === "pause") {
-            this.db.prepare("UPDATE schedules SET status='paused',updated_at=? WHERE id=?").run(now, id);
+            this.db.prepare("UPDATE schedules SET status='paused',paused_for=NULL,updated_at=? WHERE id=?").run(now, id);
             return words.paused(title);
         }
         const next = nextRun(JSON.parse(s.spec_json) as ScheduleSpec, now, s.timezone);
         if (next === null) {
-            this.db.prepare("UPDATE schedules SET status='done',next_run_at=NULL,updated_at=? WHERE id=?").run(now, id);
+            this.db.prepare("UPDATE schedules SET status='done',next_run_at=NULL,paused_for=NULL,updated_at=? WHERE id=?").run(now, id);
             return words.noNextRun(title);
         }
-        this.db.prepare("UPDATE schedules SET status='active',next_run_at=?,updated_at=? WHERE id=?").run(next, now, id);
+        // Resumed by the person: the unfinished runs before this no longer count.
+        this.db.prepare("UPDATE schedules SET status='active',next_run_at=?,paused_for=NULL,streak_from=?,updated_at=? WHERE id=?").run(next, now, now, id);
         return words.resumed(title, formatWhen(next, s.timezone));
     }
     /** Start every run that is due; a run missed while the service was down is made up once. */
@@ -1693,6 +1722,8 @@ export class TaskService {
         }
         for (const s of due) {
             if (this.#checking.has(s.id)) continue;
+            // Runs that settled out of sight (a restart, say) count as well: it pauses now instead of running again.
+            if (this.pauseIfFailing(s.id)) continue;
             try { if (s.condition_json && !s.builtin) this.checkThenFire(s, now); else this.fireSchedule(s, now); }
             catch {
                 // A run that cannot start (the model is unavailable, say) waits for the next beat.
@@ -1806,6 +1837,8 @@ export class TaskService {
             builtin: s.builtin,
             condition: s.condition_json ? JSON.parse(s.condition_json) as ScheduleCondition : null,
             lastCheck: s.last_check_json ? JSON.parse(s.last_check_json) as ConditionCheck : null,
+            // Its own mark: how many latest runs in a row ended unfinished, and whether it paused itself over that.
+            failures: this.scheduleFailures(s), pausedFor: s.status === "paused" ? s.paused_for : null,
             ...(s.builtin === DAILY_FEED ? { feed: { customized: !isDefaultFeedInstruction(s.instruction), memory: this.feedMemory(s.owner_id).map(m => ({ id: m.id, kind: m.kind, text: m.text, source: m.source })) } } : {}),
         };
     }

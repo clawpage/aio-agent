@@ -104,6 +104,8 @@ export const http = {
     unknownBody: "连接中断，结果需要你核对。",
     needsInput: (title: string) => `需要你补充：${title}`,
     needsInputBody: "打开一站补充信息。",
+    schedulePaused: (title: string) => `定时任务已暂停：${title}`,
+    schedulePausedBody: (n: number, why: string) => `连续 ${n} 次没有完成，已自动暂停，不再消耗用量。最近一次：${why}`,
     approval: (title: string) => `需要你确认：${title}`,
     approvalBody: "有一个操作等你确认，打开一站查看。",
     browser: (title: string) => `需要你操作浏览器：${title}`,

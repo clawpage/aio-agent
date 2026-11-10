@@ -103,6 +103,8 @@ export const http: typeof zh = {
     unknownBody: "接続が途切れました。結果を確認してください。",
     needsInput: (title: string) => `補足が必要です：${title}`,
     needsInputBody: "Clawpage Agent を開いて情報を補足してください。",
+    schedulePaused: (title: string) => `定期タスクを一時停止しました：${title}`,
+    schedulePausedBody: (n: number, why: string) => `${n} 回続けて完了しなかったため、自動で一時停止しました。これ以上の利用量はかかりません。直近：${why}`,
     approval: (title: string) => `確認が必要です：${title}`,
     approvalBody: "確認待ちの操作があります。Clawpage Agent を開いて確認してください。",
     browser: (title: string) => `ブラウザでの操作が必要です：${title}`,

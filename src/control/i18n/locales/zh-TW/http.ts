@@ -103,6 +103,8 @@ export const http: typeof zh = {
     unknownBody: "連線中斷，結果需要你核對。",
     needsInput: (title: string) => `需要你補充：${title}`,
     needsInputBody: "開啟一站補充資訊。",
+    schedulePaused: (title: string) => `定時任務已暫停：${title}`,
+    schedulePausedBody: (n: number, why: string) => `連續 ${n} 次沒有完成，已自動暫停，不再消耗用量。最近一次：${why}`,
     approval: (title: string) => `需要你確認：${title}`,
     approvalBody: "有一個操作等你確認，開啟一站查看。",
     browser: (title: string) => `需要你操作瀏覽器：${title}`,

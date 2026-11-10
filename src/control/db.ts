@@ -600,6 +600,9 @@ END;`);
   // A schedule's condition (scheduleCondition.ts) and how its last check went.
   if (!scheduleColumns.some(c => c.name === "condition_json")) db.exec("ALTER TABLE schedules ADD COLUMN condition_json TEXT");
   if (!scheduleColumns.some(c => c.name === "last_check_json")) db.exec("ALTER TABLE schedules ADD COLUMN last_check_json TEXT");
+  // Why a schedule paused itself ('failures': its runs kept ending unfinished), and since when its runs count towards that.
+  if (!scheduleColumns.some(c => c.name === "paused_for")) db.exec("ALTER TABLE schedules ADD COLUMN paused_for TEXT");
+  if (!scheduleColumns.some(c => c.name === "streak_from")) db.exec("ALTER TABLE schedules ADD COLUMN streak_from INTEGER NOT NULL DEFAULT 0");
   const vaultColumns = db.prepare("PRAGMA table_info(vault_entries)").all() as Array<{ name: string }>;
   if (!vaultColumns.some(c => c.name === "method")) db.exec("ALTER TABLE vault_entries ADD COLUMN method TEXT NOT NULL DEFAULT 'password' CHECK (method IN ('password','google'))");
   // Where a claim's evidence came from: a task (the original), or in a shared library also a member's own words.

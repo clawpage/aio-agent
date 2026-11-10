@@ -17,6 +17,8 @@ export const schedules: typeof zh = {
     learnedFromFeedback: " · 從你的回饋學到",
     runCount: (n: number) => `已執行 ${n} 次`,
     lastRun: (status: string) => `上次：${status}`,
+    autoPaused: (n: number) => `連續 ${n} 次沒有完成，已自動暫停，不再消耗用量。看看上次的結果，改好要求後再恢復。`,
+    failures: (n: number) => `最近連續 ${n} 次沒有完成`,
     started: (title: string) => `「${title}」已開始執行，結果會出現在主對話。`,
     loadFailed: "讀取失敗",
     actionFailed: "操作失敗",

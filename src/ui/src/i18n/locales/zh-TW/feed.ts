@@ -86,6 +86,7 @@ export const feed: typeof zh = {
     writing: "正在回覆",
   },
   scheduleRun: (title: string, rule: string) => `排程任務「${title}」自動執行 · ${rule} · `,
+  schedulePaused: (n: number) => `這個定時任務連續 ${n} 次沒有完成，已自動暫停，不再消耗用量。可在「定時任務」頁修改要求後恢復。`,
   supportNote: "客服傳來的訊息 · ",
   handBackNote: "你交還了瀏覽器，任務自動繼續 · ",
   handBackSummary: "你交還了瀏覽器，任務自動繼續",
