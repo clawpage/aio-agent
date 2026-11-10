@@ -150,7 +150,8 @@ export class EnvGateway extends McpGateway {
     switch (out.status) {
       case "missing": done(false, { reason: "missing" }); return error(`There is no environment "${envId}" for this account: call env_list for the ids.`);
       case "sandbox": done(false, { reason: "sandbox" }); return error("The sandbox is used with your own tools (the sandbox browser, shell and files), not through aio_env.");
-      case "offline": done(false, { reason: "offline" }); return error(OFFLINE[out.env.kind] ?? "The device is not reachable right now.");
+      case "offline": done(false, { reason: "offline", ...(out.told ? { told: true } : {}) }); return error(out.told ? `${out.env.name}'s app left the screen in the middle of this. The user was sent a notification to open it again and did not come back in time. Do not keep trying: say what is done and what is left, and that it goes on when they open the app and tell you.` : OFFLINE[out.env.kind] ?? "The device is not reachable right now.");
+      case "interrupted": done(false, { reason: "interrupted" }); return error(`${out.env.name}'s app left the screen while this was being done, and is back now; whether it was done is unknown: look (read the page or the screen) before trying again.`);
       case "unable": done(false, { reason: "unable" }); return error(`${out.env.name} ${UNABLE[out.capability]}.`);
       case "failed": done(false, { reason: "no answer" }); return error(`${out.env.name} did not answer in time${TOOL_CAPABILITY.get(tool) && /create|complete|push|click|type|tap|open|bash|write|edit/.test(tool) ? "; whether it was done is unknown: check before trying again" : ""}.`);
     }

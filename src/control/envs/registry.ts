@@ -31,6 +31,13 @@ export function callTimeoutMs(tool: string, args: Record<string, unknown>): numb
   if (tool === "shell_bash") { const seconds = Number(args.timeout_sec); return Math.min(seconds > 0 ? seconds : CALL_TIMEOUT_MS / 1000, MAX_COMMAND_S) * 1000 + SLACK_MS; }
   return tool === "photos_get" || tool === "files_pull" || tool === "files_push" ? SLOW_TIMEOUT_MS : CALL_TIMEOUT_MS;
 }
+/** How long a call waits for the person to bring a phone's app back on screen, once they have been told. */
+const AWAY_WAIT_MS = 600_000;
+/** A phone's app that left longer ago than this was not left in the middle of something: nobody is told, nothing waits. */
+const AWAY_RECENT_MS = 600_000;
+/** Calls that may be sent again when the first try was cut off: they change nothing, or ask the person anew. */
+const REPEATABLE = /^(browser_(read|screenshot|request_human)|screen_(read|shot)|apps_list|files_list|photos_(albums|list)|reminders_lists?|calendar_(calendars|events))$/;
+
 /** The longest any call may take, for the executor's own patience with aio_env. */
 export const MAX_CALL_TIMEOUT_MS = Math.max(HUMAN_WAIT_MS, MAX_COMMAND_S * 1000) + SLACK_MS;
 
@@ -57,6 +64,12 @@ interface Known {
   keys: Set<string>;
   capabilities: Capability[];
   routes: Route[];
+  /** When a phone's own app last went away (it leaves the screen, the system cuts it off), until it is back. */
+  leftAt?: number;
+  /** Whether the person has been told to come back, this absence. */
+  told?: boolean;
+  /** Calls waiting for it to come back. */
+  waiting?: Set<() => void>;
 }
 
 export const SANDBOX_ENV: EnvInfo = { id: "sandbox", kind: "sandbox", name: "Sandbox", online: true, foreground: false, capabilities: ["browser", "files", "shell"] };
@@ -65,7 +78,8 @@ export type EnvCall =
   | { status: "answered"; env: EnvInfo; answer: EnvAnswer }
   | { status: "missing" }
   | { status: "sandbox" }
-  | { status: "offline"; env: EnvInfo }
+  | { status: "offline"; env: EnvInfo; told?: boolean }
+  | { status: "interrupted"; env: EnvInfo }
   | { status: "unable"; env: EnvInfo; capability: Capability }
   | { status: "failed"; env: EnvInfo; error: string };
 
@@ -78,8 +92,12 @@ export class EnvRegistry {
   #browser?: UserBrowserGateway;
   #known = new Map<string, Known[]>();
   #reading = new Map<Tunnel, Promise<void>>();
+  #onAway?: (userId: string, env: EnvInfo) => void;
+  awayWaitMs = AWAY_WAIT_MS;
+  awayRecentMs = AWAY_RECENT_MS;
 
-  constructor(opts: { links: DeviceLinks; log: Logger; phone?: PhoneGateway; browser?: UserBrowserGateway; shell?: MacShellGateway }) {
+  constructor(opts: { links: DeviceLinks; log: Logger; phone?: PhoneGateway; browser?: UserBrowserGateway; shell?: MacShellGateway; onAway?: (userId: string, env: EnvInfo) => void }) {
+    this.#onAway = opts.onAway;
     this.#links = opts.links;
     this.#log = opts.log.child("envs");
     this.#mac = new OldMac(opts);
@@ -109,18 +127,47 @@ export class EnvRegistry {
     await this.list(userId);
     const known = (this.#known.get(userId) ?? []).find((k) => k.id === envId);
     if (!known) return { status: "missing" };
-    const env = this.#info(known);
-    if (!known.routes.length) return { status: "offline", env };
-    const capability = TOOL_CAPABILITY.get(tool);
-    const route = capability ? this.#best(known, capability) : undefined;
-    if (!capability || !route) return { status: "unable", env, capability: capability ?? "browser" };
-    try {
-      return { status: "answered", env, answer: await this.#send(route, caller, tool, args) };
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      this.#log.warn("environment call failed", { userId, env: envId, tool, error });
-      return known.routes.length ? { status: "failed", env, error } : { status: "offline", env };
+    const until = Date.now() + this.awayWaitMs;
+    for (;;) {
+      if (!known.routes.length && !(await this.#back(userId, known, until))) return { status: "offline", env: this.#info(known), told: known.told };
+      const env = this.#info(known);
+      const capability = TOOL_CAPABILITY.get(tool);
+      const route = capability ? this.#best(known, capability) : undefined;
+      if (!capability || !route) return { status: "unable", env, capability: capability ?? "browser" };
+      try {
+        return { status: "answered", env, answer: await this.#send(route, caller, tool, args) };
+      } catch (err) {
+        const error = err instanceof Error ? err.message : String(err);
+        this.#log.warn("environment call failed", { userId, env: envId, tool, error });
+        if (known.routes.length) return { status: "failed", env, error };
+        // The app left the screen under the call: wait for the person, then ask again only what is safe to ask twice.
+        if (!(await this.#back(userId, known, until))) return { status: "offline", env: this.#info(known), told: known.told };
+        if (!REPEATABLE.test(tool)) return { status: "interrupted", env: this.#info(known) };
+      }
     }
+  }
+
+  /**
+   * Whether a phone whose app just left the screen is back before `until`. The person is told once per absence
+   * (a notification brings them back), and the call that waited goes on by itself: the task is not lost to a
+   * glance at another app.
+   */
+  async #back(userId: string, known: Known, until: number): Promise<boolean> {
+    if (known.routes.length) return true;
+    if (known.leftAt === undefined || Date.now() - known.leftAt >= this.awayRecentMs) return false;
+    if (!known.told) {
+      known.told = true;
+      this.#log.info("environment away, person told", { userId, env: known.id });
+      try { this.#onAway?.(userId, this.#info(known)); } catch (err) { this.#log.warn("away notice failed", { error: err instanceof Error ? err.message : String(err) }); }
+    }
+    const left = until - Date.now();
+    if (left <= 0) return false;
+    await new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); known.waiting?.delete(done); resolve(); };
+      const timer = setTimeout(done, left);
+      (known.waiting ??= new Set()).add(done);
+    });
+    return known.routes.length > 0;
   }
 
   /**
@@ -226,7 +273,13 @@ export class EnvRegistry {
       env.routes.push(route);
       if (route.protocol === "v1" || env.routes.every((r) => r.protocol !== "v1")) env.name = route.name;
     }
-    for (const k of known) if (k.routes.length) k.capabilities = CAPABILITIES.filter((c) => k.routes.some((r) => r.capabilities.includes(c)));
+    for (const k of known) {
+      if (!k.routes.length) continue;
+      k.capabilities = CAPABILITIES.filter((c) => k.routes.some((r) => r.capabilities.includes(c)));
+      k.leftAt = undefined;
+      k.told = false;
+      for (const go of [...(k.waiting ?? [])]) go();
+    }
     this.#known.set(tunnel.ownerId, known);
   }
 
@@ -237,6 +290,8 @@ export class EnvRegistry {
       k.routes = k.routes.filter((r) => r.tunnel !== tunnel);
       // Still reachable another way (a phone's app gone, its Mac's USB still there): it offers what that way does.
       if (k.routes.length && k.routes.length < before) k.capabilities = CAPABILITIES.filter((c) => k.routes.some((r) => r.capabilities.includes(c)));
+      // A phone's own app gone, and no other way to the phone: the person left it (or the system cut it off).
+      if (!k.routes.length && before && k.kind !== "mac" && tunnel.kind === k.kind) k.leftAt = Date.now();
     }
   }
 

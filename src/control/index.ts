@@ -582,7 +582,9 @@ async function main(): Promise<void> {
   ctx.ios=ios;
   // Every execution environment (docs/EXEC-ENVS.md): the account's devices by what each can do, behind one server, aio_env.
   // With PA_EXEC_ENVS on it stands in for aio_mac_native and aio_ios, whose devices it also reads (envs/legacy.ts).
-  const envRegistry=new EnvRegistry({links:deviceLinks,log:ctx.log,phone,browser:userBrowser,shell:macShell});
+  // The person left their phone's app while the agent was using it: a notification brings them back, and the call that waited goes on.
+  const envAway=async(id:string,name:string)=>{const m=t((id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)).tasks.locale()).http.push;await ctx.push?.notify(id,{title:m.envAway,body:m.envAwayBody(name),tag:"env-away"},{force:true});};
+  const envRegistry=new EnvRegistry({links:deviceLinks,log:ctx.log,phone,browser:userBrowser,shell:macShell,onAway:(id,env)=>void envAway(id,env.name).catch(err=>ctx.log.warn("away notice not sent",{error:String(err)}))});
   ctx.envs=envRegistry;
   const envs=new EnvGateway({cfg:ctx.cfg,log:ctx.log,port:ctx.cfg.memberModelPort??4902,links:deviceLinks,registry:envRegistry,
     usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),userIdOf,workspace:ctx.cfg.sandbox.containerWorkspaceDir,

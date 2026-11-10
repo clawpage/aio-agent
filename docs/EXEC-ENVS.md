@@ -133,6 +133,17 @@ page. It is the device link: on links this iPhone with no ability on, off remove
 with it. Without that switch (an older app, or the environments off for the account) the link comes with the
 first ability turned on and goes with the last one turned off, as before.
 
+## When the person leaves the phone's app mid-task
+
+A phone's app is only reachable on screen (iOS closes the link five seconds into the background). A call
+that finds the phone gone, or loses it part-way, does not fail at once when the phone was there within the
+last ten minutes (`EnvRegistry`, `AWAY_RECENT_MS`): the account gets one push per absence ("the task is
+waiting for you", `onAway`) and the call waits up to ten minutes (`AWAY_WAIT_MS`) for the app to come back.
+On return, calls that change nothing and `browser_request_human` are sent again; a call with an effect
+(click, type, open) is not repeated and answers "back now, whether it was done is unknown: look before
+trying again". Nobody back in time: the agent is told to stop trying and say what is left. A phone away
+longer than that answers offline at once, with no notification. A Mac is never waited for.
+
 ## The Android app's browser
 
 The same panel in the Android app (`AIBrowser.kt`): a second web view over the console, with a WebView

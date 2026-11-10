@@ -107,6 +107,8 @@ export const http: typeof zh = {
     approvalBody: "確認待ちの操作があります。Clawpage Agent を開いて確認してください。",
     browser: (title: string) => `ブラウザでの操作が必要です：${title}`,
     browserBody: "Clawpage Agent を開いてブラウザの操作を引き継いでください。",
+    envAway: "タスクが Clawpage Agent であなたを待っています",
+    envAwayBody: (name: string) => `AI が ${name} を使用中です。アプリに戻ると自動で続行します。`,
   },
   tasks: {
     badFilter: "絞り込み条件が無効です",

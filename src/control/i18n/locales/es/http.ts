@@ -107,6 +107,8 @@ export const http: typeof zh = {
     approvalBody: "Hay una acción esperando tu confirmación. Abre Clawpage Agent para verla.",
     browser: (title: string) => `Te necesita en el navegador: ${title}`,
     browserBody: "Abre Clawpage Agent para tomar el control del navegador.",
+    envAway: "Una tarea te espera en Clawpage Agent",
+    envAwayBody: (name: string) => `La IA está usando ${name}. Vuelve a la app y continuará sola.`,
   },
   tasks: {
     badFilter: "Filtro no válido",

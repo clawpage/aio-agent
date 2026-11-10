@@ -108,6 +108,8 @@ export const http = {
     approvalBody: "有一个操作等你确认，打开一站查看。",
     browser: (title: string) => `需要你操作浏览器：${title}`,
     browserBody: "打开一站接管浏览器。",
+    envAway: "任务在等你回到一站",
+    envAwayBody: (name: string) => `AI 正在使用 ${name}，回到 App 后会自动继续。`,
   },
   tasks: {
     badFilter: "筛选条件无效",

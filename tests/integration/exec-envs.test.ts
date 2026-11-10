@@ -403,6 +403,103 @@ describe("boundaries", () => {
   });
 });
 
+describe("when the person leaves the phone's app in the middle of a task", () => {
+  /** An iPhone whose answers the test holds back, to leave while one is awaited. */
+  function slowIphone(token: string, held: Set<string>) {
+    return device(url, token, "Alice's iPhone", ({ method, path, body }) => {
+      if (method === "GET" && path === "/env/manifest") return { status: 200, body: { protocol: 1, envs: [{ deviceId: "IPHONE-VENDOR-ID", kind: "ios", name: "Alice's iPhone", capabilities: ["browser"], foreground: true }] } };
+      if (method !== "POST" || path !== "/env/call") return { status: 404 };
+      return held.has(body.tool) ? null : { status: 200, body: { ok: true, result: { did: body.tool } } };
+    });
+  }
+  async function leave(stand: ReturnType<typeof device>, userId: string) {
+    stand.ws.close();
+    await waitFor(async () => (await registry.list(userId)).find((e) => e.kind === "ios" && !e.online));
+  }
+
+  it("tells them once to come back, waits, and goes on with the call when they do", async () => {
+    registry.awayWaitMs = 60_000;
+    const alice = await signIn("alice");
+    const agent = executor(runtimeFor(alice.id, 18120));
+    const token = await link(alice, "ios", "iPhone");
+    const first = await connect(newIphone(url, token), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "ios")!.id;
+    await leave(first, alice.id);
+
+    const reading = agent.call("browser_read", { env });
+    const second = agent.call("browser_read", { env });
+    await waitFor(() => world.away.length > 0);
+    expect(world.away).toEqual([{ userId: alice.id, name: "Alice's iPhone", kind: "ios" }]);
+    const back = await connect(newIphone(url, token), alice.id, 1);
+    expect((await reading).isError).toBeUndefined();
+    expect((await second).isError).toBeUndefined();
+    expect(back.calls().map((c) => c.tool)).toEqual(["browser_read", "browser_read"]);
+    // One notice for one absence, however many calls waited through it.
+    expect(world.away).toHaveLength(1);
+  });
+
+  it("asks the person again when they left while the agent waited for them, and takes their answer", async () => {
+    registry.awayWaitMs = 60_000;
+    const alice = await signIn("alice");
+    const agent = executor(runtimeFor(alice.id, 18121));
+    const token = await link(alice, "ios", "iPhone");
+    const first = await connect(slowIphone(token, new Set(["browser_request_human"])), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "ios")!.id;
+    const waiting = agent.call("browser_request_human", { env, reason: "Sign in to Google" });
+    await waitFor(() => first.calls().length > 0);
+    first.ws.close();
+    await waitFor(() => world.away.length > 0);
+    const back = await connect(slowIphone(token, new Set()), alice.id, 1);
+    const out = await waiting;
+    expect(out.isError).toBeUndefined();
+    expect(back.calls()).toEqual([{ env: "IPHONE-VENDOR-ID", tool: "browser_request_human", arguments: { reason: "Sign in to Google" } }]);
+  });
+
+  it("does not repeat a click that was under way: it says the result is unknown once they are back", async () => {
+    registry.awayWaitMs = 60_000;
+    const alice = await signIn("alice");
+    const agent = executor(runtimeFor(alice.id, 18122));
+    const token = await link(alice, "ios", "iPhone");
+    const first = await connect(slowIphone(token, new Set(["browser_click"])), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "ios")!.id;
+    const clicking = agent.call("browser_click", { env, ref: "e1" });
+    await waitFor(() => first.calls().length > 0);
+    first.ws.close();
+    await waitFor(() => world.away.length > 0);
+    const back = await connect(slowIphone(token, new Set()), alice.id, 1);
+    const out = await clicking;
+    expect(out.isError).toBe(true);
+    expect(agent.text(out)).toMatch(/is back.*unknown.*before trying again/is);
+    expect(back.calls()).toEqual([]);
+  });
+
+  it("gives up when they stay away, saying they were told", async () => {
+    registry.awayWaitMs = 30;
+    const alice = await signIn("alice");
+    const agent = executor(runtimeFor(alice.id, 18123));
+    const first = await connect(newIphone(url, await link(alice, "ios", "iPhone")), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "ios")!.id;
+    await leave(first, alice.id);
+    const out = await agent.call("browser_read", { env });
+    expect(out.isError).toBe(true);
+    expect(agent.text(out)).toMatch(/notif.*did not come back/is);
+    expect(world.away).toHaveLength(1);
+  });
+
+  it("neither waits nor notifies for a phone that has been away a long time", async () => {
+    registry.awayWaitMs = 60_000;
+    registry.awayRecentMs = 0;
+    const alice = await signIn("alice");
+    const agent = executor(runtimeFor(alice.id, 18124));
+    const first = await connect(newIphone(url, await link(alice, "ios", "iPhone")), alice.id, 1);
+    const env = (await agent.list()).envs.find((e) => e.kind === "ios")!.id;
+    await leave(first, alice.id);
+    const out = await agent.call("browser_read", { env });
+    expect(agent.text(out)).toMatch(/open the app/i);
+    expect(world.away).toEqual([]);
+  });
+});
+
 describe("choosing the environment", () => {
   it("tells each turn what is online, and that the device the person is using comes first for its own things", async () => {
     const alice = await signIn("alice");

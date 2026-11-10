@@ -25,7 +25,10 @@ export async function startEnvWorld() {
   const links = new DeviceLinks(h.ctx.db, cfg, log);
   const mac = macParts({ cfg, log, usernameOf: names, userIdOf: ids, links });
   const saved = new Map<string, { userId: string; bytes: Buffer }>();
-  const registry = new EnvRegistry({ links, log, phone: mac.phone, browser: mac.browser, shell: mac.shell });
+  /** Who was told to come back to their phone's app; tests that wait for them say how long (`registry.awayWaitMs`). */
+  const away: Array<{ userId: string; name: string; kind: string }> = [];
+  const registry = new EnvRegistry({ links, log, phone: mac.phone, browser: mac.browser, shell: mac.shell, onAway: (userId, env) => { away.push({ userId, name: env.name, kind: env.kind }); } });
+  registry.awayWaitMs = 0;
   const envs = new EnvGateway({ cfg, log, port: 0, usernameOf: names, userIdOf: ids, links, registry, workspace: "/home/gem/workspace",
     filesFor: async (userId) => ({
       read: async (file) => { const kept = saved.get(file); if (!kept || kept.userId !== userId) throw new Error("no such file"); return kept.bytes; },
@@ -87,7 +90,7 @@ export async function startEnvWorld() {
     await h.shutdown();
   }
 
-  return { h, links, registry, gateway, mac, saved, devices, url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, signIn, link, runtimeFor, local, executor, close };
+  return { h, links, registry, gateway, mac, saved, away, devices, url: `ws://localhost:${h.primaryPort}${DEVICE_LINK_PATH}`, signIn, link, runtimeFor, local, executor, close };
 }
 
 /** Polls until `probe` gives something truthy (every 25 ms, at most `ms`). */

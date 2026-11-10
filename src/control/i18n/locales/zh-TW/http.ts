@@ -107,6 +107,8 @@ export const http: typeof zh = {
     approvalBody: "有一個操作等你確認，開啟一站查看。",
     browser: (title: string) => `需要你操作瀏覽器：${title}`,
     browserBody: "開啟一站接管瀏覽器。",
+    envAway: "任務在等你回到一站",
+    envAwayBody: (name: string) => `AI 正在使用 ${name}，回到 App 後會自動繼續。`,
   },
   tasks: {
     badFilter: "篩選條件無效",
