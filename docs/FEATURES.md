@@ -1079,7 +1079,7 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
 - **浏览器**：控制台右上角的一个小窗（实时缩小的页面，在标题栏下方），点开占满状态栏以下的整个屏幕（AI 请你操作时，说明只占页面上方两行，点一下看全文），有「最小化」「关闭」，返回键先后退、再缩小；配色与控制台一致（深浅两套）：平时小窗描边和标题前的圆点是靛紫（AI 在办），AI 请你操作时变琥珀（轮到你），说明是浅琥珀底，底部一颗琥珀色的「完成」按钮，iPhone 上相同；它有自己的 WebView profile，登录状态与控制台分开。
   Android 的 WebView 没有隔离的脚本世界，所以读页和操作的脚本运行在页面自己的世界里，但不留下任何东西（不加属性、节点、全局变量，不改原型）；元素的 ref 是它在页面控件里的序号，每次按同一方式重新找到，并核对上次读页时的指纹，页面变了就让 AI 重新读。
   点击是对元素中心的真实触摸（页面停稳后测量），输入是键盘的文字（经 WebView 自己的输入连接，支持中文）、回车是真实按键，滚动是手指滑动，页面看到的事件都是 `isTrusted`。只有真实输入做不到时才用脚本：元素被遮住或无法滚到屏幕上的点击、下拉框的取值、键盘连接没送到的文字（都记日志）。
-  不改 User-Agent（WebView 自己的，带 `; wv`）；请求 WebView 不发 `X-Requested-With`（模拟器里的 WebView 124 仍在主框架导航上发送）。付款、下单、发送、删除、登录授权类的点击先在手机上弹窗确认，`browser_request_human` 全屏显示 AI 的请求和「完成，交还给 AI」，密码不代填，与 iPhone 相同。
+  不改 User-Agent（WebView 自己的，带 `; wv`）；请求 WebView 不发 `X-Requested-With`（模拟器里的 WebView 124 仍在主框架导航上发送）。付款、下单、发送、删除、登录授权类的点击先在手机上弹窗确认，`browser_request_human` 全屏显示 AI 的请求和「完成，交还给 AI」（点了就缩回小窗，控制台回到前面），密码不代填，与 iPhone 相同。
 - **文件夹**：App 专属存储里的 `AI Files`（`Android/data/ai.clawpage.agent/files/AI Files`，不需要存储权限），`files_list` / `files_pull` / `files_push`，路径出不了这个文件夹；同名文件存为「名 (2)」。
   放进手机和取回工作区的文件都最大 20 MB（与 `aio_env` 的 `MAX_FILE_BYTES` 相同）。取回时控制面按段要（`offset` / `length`，每段 6 MB），App 每段回一条消息并带上文件总大小，控制面拼起来再存：一条应答两次 base64 后不能超过 OkHttp 单条 16 MB 的发送上限。不带 `offset` 的整份请求（还不会按段取回的控制面）仍只给 8 MB 以内的文件；iPhone App 不认 `offset`，照旧整份回答（不带 `size`），控制面也照旧接收。
   这个文件夹也出现在系统自带的「文件」App 里（`AIFilesProvider`，一个只允许系统绑定的 `DocumentsProvider`，名称是 App 名），用户在那里打开、添加、改名、删除文件；不需要任何权限，也只提供这个文件夹。

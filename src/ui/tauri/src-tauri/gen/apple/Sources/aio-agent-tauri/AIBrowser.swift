@@ -382,7 +382,8 @@ private final class BrowserPanel: UIView {
         doneButton.layer.cornerRadius = 12
         doneBox.backgroundColor = Theme.surface
         doneBox.addSubview(doneButton)
-        doneButton.addAction(UIAction { [weak self] _ in let done = self?.onDone; self?.onDone = nil; self?.setAsk(nil); done?() }, for: .touchUpInside)
+        // Handed back: the agent carries on, so the browser goes back to the small window and the console is in front again.
+        doneButton.addAction(UIAction { [weak self] _ in let done = self?.onDone; self?.onDone = nil; self?.setAsk(nil); self?.show(expanded: false); done?() }, for: .touchUpInside)
 
         holder.clipsToBounds = true
         webView.layer.anchorPoint = .zero

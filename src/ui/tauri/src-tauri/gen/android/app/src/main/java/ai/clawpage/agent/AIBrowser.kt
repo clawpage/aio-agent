@@ -630,7 +630,8 @@ private class BrowserPanel(private val activity: Activity, private val webView: 
     doneButton.background = GradientDrawable().apply { cornerRadius = dp(12); setColor(you) }
     doneBox.setBackgroundColor(surface)
     doneBox.addView(doneButton, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48).toInt()).apply { setMargins(dp(16).toInt(), dp(10).toInt(), dp(16).toInt(), dp(10).toInt()) })
-    doneButton.setOnClickListener { val done = onDone; onDone = null; setAsk(null); done?.invoke() }
+    // Handed back: the agent carries on, so the browser goes back to the small window and the console is in front again.
+    doneButton.setOnClickListener { val done = onDone; onDone = null; setAsk(null); show(expanded = false); done?.invoke() }
     card.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48).toInt()))
     card.addView(View(activity).apply { setBackgroundColor(hairline) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
     card.addView(banner, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
