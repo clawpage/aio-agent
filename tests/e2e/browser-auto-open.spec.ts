@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { makeConversation, mockConsole, type MockConversation } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 // Agent navigation must never change the user-selected workspace view.
 
@@ -130,7 +131,6 @@ test('main inbox and task details stay put during browser navigation; workspace 
   await page.getByRole('button',{name:'展开任务：浏览网页',exact:true}).click();
   await expect(page.locator('.task-detail .working')).toBeVisible();
   await expect(page.locator('.workspace')).toHaveCount(0);
-  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
-  await page.locator('.sidebar').getByRole('button',{name:'工作区',exact:true}).click();
+  await openWorkspace(page);
   await expect(page.locator('.workspace')).toBeVisible();
 });

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { mockConsole } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const evidence = "var/.playwright-artifacts/mac-terminal";
 type Status = { state: "unlinked" | "offline" | "outdated" } | { state: "ready"; enabled: boolean; tmux: boolean };
@@ -14,8 +15,7 @@ async function openMacTerminal(page: Page, mobile: boolean, status: { current: S
   await page.route("**/api/mac-shell/status", (r) => r.fulfill({ json: status.current }));
   await page.route("**/api/device-links**", (r) => r.fulfill({ json: { links: linkIds.map((id) => ({ id, name: "Mac", createdAt: Date.now(), lastSeenAt: Date.now(), online: true })) } }));
   await page.goto("/");
-  if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
-  await page.locator(".sidebar").getByRole("button", { name: "工作区", exact: true }).click();
+  await openWorkspace(page);
   await page.getByRole("tablist", { name: "应用" }).getByRole("tab", { name: "Mac 终端", exact: true }).click();
   await expect(page.locator(".window-title")).toHaveText("Mac 终端");
   return page.getByRole("region", { name: "Mac 终端" });

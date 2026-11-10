@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockConsole, makeConversation } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const content = "[文件](/home/gem/workspace/report.md)\n\n```svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 100\"><rect width=\"200\" height=\"100\" fill=\"purple\"/></svg>\n```\n\n```map\n{\"name\":\"金门大桥\",\"lat\":37.82,\"lng\":-122.48}\n```\n\n[内网网页](http://192.168.1.20)\n\n" + "长消息正文\n\n".repeat(100);
 const task = { id: "motion", revision: 1, title: "动画验证", text: "查看", result: content, status: "completed", conversationId: "child", attachments: [], createdAt: 1000, completedAt: 2000, approvals: 0, dependencies: [] };
@@ -118,8 +119,7 @@ test("sheets slide vertically while mobile task navigation slides horizontally",
   await audit(page, ".task-console");
   await console.getByRole("button", { name: "关闭操作面板" }).click(); await exited(page, ".task-console");
   await audit(page, ".workspace");
-  if (info.project.name.startsWith("mobile")) await page.getByRole("button", { name: "打开导航" }).click();
-  await page.locator(".sidebar").getByRole("button", { name: "工作区", exact: true }).click();
+  await openWorkspace(page);
   await entered(page, ".workspace");
   await page.getByRole("button", { name: "关闭工作区" }).click(); await exited(page, ".workspace");
 });

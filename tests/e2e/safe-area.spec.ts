@@ -1,6 +1,7 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
 import { makeConversation, mockConsole, mockTaskList } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const picture = fs.readFileSync(new URL("../../src/ui/public/icon-192.png", import.meta.url));
 const result = `[报告](/home/gem/workspace/report.md)\n\n![图片](/home/gem/workspace/picture.png)\n\n[操作网页](http://192.168.1.20)\n\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><rect width="200" height="100" fill="#8f86ff"/></svg>\n\`\`\`\n\n\`\`\`map\n{"name":"金门大桥","address":"San Francisco","lat":37.8199,"lng":-122.4783}\n\`\`\``;
@@ -132,7 +133,7 @@ for (const c of cases) {
     await page.screenshot({ path: info.outputPath(`${c.name}-console-safe.png`) });
     await console.getByRole("button", { name: "关闭操作面板" }).click();
 
-    await navigate(page, "工作区", mobile);
+    await openWorkspace(page);
     await contained(page, page.locator(".workspace .ws-head"), c.safe);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   });

@@ -3,6 +3,7 @@ import { makeConversation, mockConsole, mockTaskList } from "./mock-api";
 import type { Task } from "../../src/ui/src/types";
 import fs from "node:fs";
 import { HTML_PREVIEW_CSP, htmlPreviewDocument } from "../../src/control/documents/html";
+import { openWorkspace } from "./open-workspace";
 function task(n: number, status = "running"): Task {
     return { id: `task-${n}`, revision: 1, title: `任务 ${n}`, text: `请求 ${n}`, conversationId: `child-${n}`, status, result: null, error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000 + n, completedAt: null };
 }
@@ -399,7 +400,7 @@ test("mobile drawer replaces bottom navigation and preserves the chat draft",asy
         await expect(page.locator('.sidebar')).toBeHidden();
         await menu.click();await drawer.getByRole('button',{name:'主会话',exact:true}).click();
         await expect(page.getByRole('textbox',{name:'消息',exact:true})).toHaveValue('保留这段草稿');
-        await menu.click();await drawer.getByRole('button',{name:'工作区',exact:true}).click();
+        await expect(drawer.getByRole('button',{name:'工作区',exact:true})).toHaveCount(0);await openWorkspace(page);
         await expect(page.locator('.workspace')).toBeVisible();
         const workspace=await page.locator('.workspace').boundingBox();expect(workspace!.y+workspace!.height).toBe(844);
         await menu.click();await drawer.getByRole('button',{name:'主会话',exact:true}).click();

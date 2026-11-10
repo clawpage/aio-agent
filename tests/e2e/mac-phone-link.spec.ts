@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 import { mockConsole } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const evidence = "var/.playwright-artifacts/mac-phone-link";
 
@@ -13,8 +14,7 @@ async function openPhoneApp(page: Page, mobile: boolean, available = false) {
   await page.route("http://127.0.0.1:4289/**", (r) => r.fulfill({ contentType: "text/html", body: "<html><body>sandbox</body></html>" }));
   await page.route("**/api/phone", (r) => r.fulfill({ json: available ? { available: true, reachable: true, device: { serial: "S", name: "Pixel", android: "16" } } : { available: false, device: null } }));
   await page.goto("/");
-  if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
-  await page.locator(".sidebar").getByRole("button", { name: "工作区", exact: true }).click();
+  await openWorkspace(page);
   await page.getByRole("tablist", { name: "应用" }).getByRole("tab", { name: "手机" }).click();
 }
 

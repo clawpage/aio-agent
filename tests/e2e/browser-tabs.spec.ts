@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import { mockConsole } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const picture = fs.readFileSync(new URL("../../src/ui/public/icon-512.png", import.meta.url));
 const pages = [
@@ -17,9 +18,7 @@ async function openBrowser(page: Page) {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "主会话", exact: true })).toBeVisible();
-  const workspace = page.getByRole("button", { name: "工作区", exact: true });
-  if (!(await workspace.isVisible())) await page.getByRole("button", { name: /菜单|打开导航/ }).first().click();
-  await workspace.click();
+  await openWorkspace(page);
   const icon = page.locator(".desktop-icon", { hasText: "沙盒浏览器" });
   if (await icon.isVisible().catch(() => false)) await icon.click();
   await expect(page.locator(".workspace .desktop-frame iframe")).toBeVisible();

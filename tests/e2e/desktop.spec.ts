@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { mockConsole } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 /** Where the desktop's picture sits in its frame (on a phone it is zoomed and panned by the console's gestures). */
 async function desktopGeometry(frame: import("@playwright/test").Locator) {
@@ -21,8 +22,7 @@ test("the workspace is a desktop: a menu bar, one app window, a Dock, and minimi
   );
   const mobile = info.project.name.startsWith("mobile");
   await page.goto("/");
-  if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
-  await page.locator(".sidebar").getByRole("button", { name: "工作区", exact: true }).click();
+  await openWorkspace(page);
 
   const desk = page.locator(".workspace.desktop");
   const dock = page.getByRole("tablist", { name: "应用" });

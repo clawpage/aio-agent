@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { makeConversation, mockConsole } from "./mock-api";
 import { NOVNC_ASSET_VERSION } from "../../src/control/sandbox/novncPatch";
+import { openWorkspace } from "./open-workspace";
 
 /**
  * Browser lifecycle in the workspace panel.
@@ -283,7 +284,7 @@ test("a console left open but untouched stops its heartbeat and puts the desktop
   });
   await page.clock.install();
   await page.goto("/");
-  await page.getByRole("button", { name: "工作区", exact: true }).first().click();
+  await openWorkspace(page);
   const frame = page.locator(".workspace iframe");
   await expect(frame).toBeVisible();
   await expect.poll(() => presence).toBeGreaterThan(0);

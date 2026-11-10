@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockConsole } from "./mock-api";
+import { openWorkspace } from "./open-workspace";
 
 const task = { id: "task-route", revision: 1, title: "查天气", text: "明天天气怎么样", conversationId: "child-route", status: "completed", result: "明天晴。", error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: Date.now() - 600_000, completedAt: Date.now() - 500_000 };
 const old = { ...task, id: "task-old", title: "很久以前的任务", conversationId: "child-old", result: "早就做完了。" };
@@ -43,7 +44,7 @@ test("each page of the console has its own address, and back and forward follow 
   await expect.poll(() => path(page)).toBe("/u/owner/settings");
 
   // The workspace opens at its own address over the page and closing it goes back.
-  await nav(page, "工作区", mobile);
+  await openWorkspace(page);
   await expect.poll(() => path(page)).toBe("/u/owner/workspace");
   await expect(page.locator(".workspace")).toBeVisible();
   await page.getByRole("button", { name: "关闭工作区" }).click();

@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import fs from "node:fs";
 import { mockConsole } from "./mock-api";
+import { openWorkspace as openByAddress } from "./open-workspace";
 
 type MacPage = { id: number; title: string; url: string; owner: "you" | "task" | "none"; holder: "ai" | "human" | null; task: { id: string; title: string } | null };
 
@@ -14,8 +15,7 @@ async function openWorkspace(page: Page, app: string, mobile: boolean) {
   });
   await page.route("http://127.0.0.1:4289/**", (r) => r.fulfill({ contentType: "text/html", body: "<html><body>沙箱页面</body></html>" }));
   await page.goto("/");
-  if (mobile) await page.getByRole("button", { name: "打开导航" }).click();
-  await page.locator(".sidebar").getByRole("button", { name: "工作区", exact: true }).click();
+  await openByAddress(page);
   await page.getByRole("tablist", { name: "应用" }).getByRole("tab", { name: app, exact: true }).click();
 }
 

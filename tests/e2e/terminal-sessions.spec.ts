@@ -1,5 +1,6 @@
 import {test,expect} from '@playwright/test';
 import {mockConsole} from './mock-api';
+import { openWorkspace } from "./open-workspace";
 
 test('compact terminal picker switches, creates and closes sessions while preserving failed closes and off-tab sessions',async({page},info)=>{
   await mockConsole(page,{conversations:[]});
@@ -21,8 +22,7 @@ test('compact terminal picker switches, creates and closes sessions while preser
   });
   await page.addInitScript(()=>Object.defineProperty(navigator,'clipboard',{value:{writeText:async(value:string)=>{(window as any).copied=value;}}}));
   await page.goto('/');
-  if(info.project.name.startsWith('mobile'))await page.getByRole('button',{name:'打开导航'}).click();
-  await page.locator('.sidebar').getByRole('button',{name:'工作区',exact:true}).click();
+  await openWorkspace(page);
   expect(reads).toBe(0);await page.getByRole('tab',{name:'终端',exact:true}).click();
   const panel=page.getByRole('region',{name:'活跃 Shell 会话'});const picker=page.getByRole('button',{name:'切换终端会话'});const frame=page.locator('iframe[title="终端"]');
   await expect(frame).toHaveAttribute('src',new RegExp(running));await expect(picker).toHaveAttribute('aria-expanded','false');
