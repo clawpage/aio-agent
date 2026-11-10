@@ -290,7 +290,7 @@ export const api = {
   appleVerify: (identityToken: string) => request<{authenticated: boolean; pending?: {email: string}}>("/api/auth/apple/verify", {method: "POST", body: {identityToken, timeZone: browserTimeZone()}}),
   appleRegister: (account: {inviteCode: string}) => request<{ok: boolean}>("/api/auth/apple/register", {method: "POST", body: {...account, timeZone: browserTimeZone()}}),
   appleCancel: () => request<{ok: boolean}>("/api/auth/apple/cancel", {method: "POST"}),
-  deviceLinks: (kind: "mac" | "ios" | "android" = "mac") => request<{ links: import("./types").DeviceLink[] }>(kind === "mac" ? "/api/device-links" : `/api/device-links?kind=${kind}`, { cache: "no-store" }),
+  deviceLinks: (kind: "mac" | "ios" | "android" = "mac") => request<{ links: import("./types").DeviceLink[]; envs?: boolean }>(kind === "mac" ? "/api/device-links" : `/api/device-links?kind=${kind}`, { cache: "no-store" }),
   createDeviceLink: (name: string, kind: "mac" | "ios" | "android" = "mac") => request<{ link: import("./types").DeviceLink; token: string }>("/api/device-links", { method: "POST", body: kind === "mac" ? { name } : { name, kind } }),
   iosDevice: () => request<{ linked: boolean; reachable: boolean; abilities: Record<"photos" | "reminders" | "calendar", { enabled: boolean; permission: string }> | null }>("/api/ios-device", { cache: "no-store" }),
   deleteDeviceLink: (id: string) => request<{ ok: boolean }>(`/api/device-links/${encodeURIComponent(id)}`, { method: "DELETE" }),

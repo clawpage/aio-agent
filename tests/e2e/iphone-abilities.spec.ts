@@ -4,7 +4,7 @@ import { mockConsole, openSettingsEntry } from "./mock-api";
 type Link = { id: string; name: string; createdAt: number; lastSeenAt: number | null; online: boolean };
 
 /** The control plane's iPhone links (`/api/device-links?kind=ios`), kept in memory. */
-async function mockLinks(page: Page, links: Link[]) {
+async function mockLinks(page: Page, links: Link[], envs = false) {
   const calls: string[] = [];
   await page.route("**/api/device-links**", async (route) => {
     const req = route.request();
@@ -19,7 +19,7 @@ async function mockLinks(page: Page, links: Link[]) {
       links.splice(links.findIndex((l) => l.id === url.pathname.split("/").pop()), 1);
       return route.fulfill({ json: { ok: true } });
     }
-    return route.fulfill({ json: { links: url.searchParams.get("kind") === "ios" ? links : [] } });
+    return route.fulfill({ json: { links: url.searchParams.get("kind") === "ios" ? links : [], envs } });
   });
   return calls;
 }
@@ -101,6 +101,82 @@ test("inside the iPhone app, each ability is switched on there: iOS asks, the fi
   await expect.poll(sent).toContainEqual({ type: "unlink" });
   await expect(card).not.toContainText("已连接");
 });
+
+test("an app with its own browser has a switch for it: on links this iPhone with nothing else on, off removes it", async ({ page }, info) => {
+  // The 0.1.5 app (docs/EXEC-ENVS.md) says its version; the account has the execution environments.
+  await page.addInitScript(() => {
+    const sent: Array<Record<string, unknown>> = [];
+    (window as unknown as { __sent: typeof sent }).__sent = sent;
+    const off = () => ({ photos: { enabled: false, permission: "notDetermined" }, reminders: { enabled: false, permission: "notDetermined" }, calendar: { enabled: false, permission: "notDetermined" } }) as Record<string, { enabled: boolean; permission: string }>;
+    const state = { linked: false, linkId: null as string | null, state: "off", name: "Mengxiao's iPhone", app: "0.1.5", abilities: off() };
+    (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { aioDeviceTools: { postMessage: async (raw: string) => {
+      const msg = JSON.parse(raw) as { type: string; ability?: string; linkId?: string };
+      sent.push(msg);
+      const a = msg.ability ? state.abilities[msg.ability]! : null;
+      if (msg.type === "enable" && a) Object.assign(a, { enabled: true, permission: "authorized" });
+      if (msg.type === "disable" && a) a.enabled = false;
+      if (msg.type === "link") Object.assign(state, { linked: true, linkId: msg.linkId, state: "online" });
+      // The app forgets everything with its link (Store.forget).
+      if (msg.type === "unlink") Object.assign(state, { linked: false, linkId: null, state: "off", abilities: off() });
+      return JSON.stringify(state);
+    } } } };
+  });
+  await mockConsole(page, { conversations: [] });
+  const calls = await mockLinks(page, [], true);
+  await openSettings(page, info.project.name.startsWith("mobile"));
+  const sent = () => page.evaluate(() => (window as unknown as { __sent: Array<Record<string, unknown>> }).__sent);
+  const card = page.getByRole("region", { name: "iPhone 能力" });
+  const browser = card.getByRole("checkbox", { name: "浏览器和 App 的文件夹" });
+  const calendar = card.getByRole("checkbox", { name: "日历" });
+  await expect(card.getByRole("checkbox")).toHaveCount(4);
+  await expect(browser).not.toBeChecked();
+  await expect(card).toContainText("下单、付款这类操作前会先问你");
+
+  // On, with no ability on: this iPhone is linked, which is all the browser and the folder need.
+  await browser.click();
+  await expect(browser).toBeChecked();
+  await expect(card).toContainText("已连接");
+  expect(calls).toContain(`POST /api/device-links ${JSON.stringify({ name: "Mengxiao's iPhone", kind: "ios" })}`);
+  expect(await sent()).toContainEqual({ type: "link", token: `dl_${"t".repeat(43)}`, linkId: "dlink_ios", account: "owner" });
+  await card.screenshot({ path: info.outputPath("iphone-browser-switch.png") });
+
+  // An ability on and off again: the link stays, for the browser.
+  await calendar.click();
+  await expect(calendar).toBeChecked();
+  await calendar.click();
+  await expect(calendar).not.toBeChecked();
+  await expect(browser).toBeChecked();
+  expect(calls.filter((c) => c.startsWith("DELETE"))).toEqual([]);
+
+  // Off: the link goes, here and on the server, and every ability with it.
+  await calendar.click();
+  await browser.click();
+  await expect(browser).not.toBeChecked();
+  await expect(calendar).not.toBeChecked();
+  await expect.poll(() => calls).toContain("DELETE /api/device-links/dlink_ios");
+  await expect.poll(sent).toContainEqual({ type: "unlink" });
+
+  // An ability turned on first links the iPhone, so its browser is on too.
+  await calendar.click();
+  await expect(calendar).toBeChecked();
+  await expect(browser).toBeChecked();
+});
+
+for (const [why, app, envs] of [["an older app", "0.1.4", true], ["an account without the environments", "0.1.5", false]] as const) {
+  test(`no browser switch where it would do nothing: ${why}`, async ({ page }, info) => {
+    await page.addInitScript((version) => {
+      const state = { linked: false, linkId: null, state: "off", name: "iPhone", app: version,
+        abilities: { photos: { enabled: false, permission: "notDetermined" }, reminders: { enabled: false, permission: "notDetermined" }, calendar: { enabled: false, permission: "notDetermined" } } };
+      (window as unknown as { webkit: unknown }).webkit = { messageHandlers: { aioDeviceTools: { postMessage: async () => JSON.stringify(state) } } };
+    }, app);
+    await mockConsole(page, { conversations: [] });
+    await mockLinks(page, [], envs);
+    await openSettings(page, info.project.name.startsWith("mobile"));
+    const card = page.getByRole("region", { name: "iPhone 能力" });
+    await expect(card.getByRole("checkbox")).toHaveCount(3);
+    await expect(card.getByRole("checkbox", { name: "浏览器和 App 的文件夹" })).toHaveCount(0);
+  });
+}
 
 test("in a browser the card lists the iPhones the account linked, with what is on, and removes one", async ({ page }, info) => {
   await mockConsole(page, { conversations: [] });

@@ -2187,7 +2187,10 @@ export function createApiRouter(context: AppContext): Router {
   router.get("/device-links", requireKind("primary"), requireSession, (req, res) => {
     const kind = linkKind(req.query.kind);
     if (!kind) { res.status(400).json({ error: "bad_request" }); return; }
-    res.json({ links: context.deviceLinks?.list(ctxOf(req).session!.ownerId, kind) ?? [] });
+    const ownerId = ctxOf(req).session!.ownerId;
+    // `envs`: this account's agent has the execution environments (docs/EXEC-ENVS.md), so a phone's own browser is worth a switch.
+    const envs = context.cfg.execEnvs === true && (!context.cfg.execEnvsOwnerOnly || ownerId === (context.cfg.runtimeUserId ?? "owner_1"));
+    res.json({ links: context.deviceLinks?.list(ownerId, kind) ?? [], envs });
   });
   router.post("/device-links", requireKind("primary"), requireSession, (req, res) => {
     if (!context.deviceLinks) { res.status(404).json({ error: "not_found" }); return; }

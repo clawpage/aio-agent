@@ -21,6 +21,8 @@ export interface NativeTools {
   state: ToolsState;
   /** This phone's name, offered as the link's name. */
   name: string;
+  /** The app's version (iPhone). From 0.1.5 it has a browser and a folder of its own, which come with its link. */
+  app?: string;
   /** On Android only photos and calendar; `shared` is how many photos the person shared there. */
   abilities: Partial<Record<Ability, { enabled: boolean; permission: Permission; shared?: number }>>;
   /** Android, answering `photosShared`: the shared photos, with small copies to recognize them by. */
@@ -54,6 +56,14 @@ export function deviceToolsApp(): DeviceApp | null {
   const shell = window as ToolsWindow;
   if (shell.webkit?.messageHandlers?.aioDeviceTools) return "ios";
   return shell.aioDeviceTools ? "android" : null;
+}
+
+/** Whether a version like "0.1.5" is `min` or later. */
+export function appAtLeast(version: string | undefined, min: string): boolean {
+  if (!version) return false;
+  const a = version.split(".").map(Number), b = min.split(".").map(Number);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return true;
 }
 
 export function hasDeviceTools(app: DeviceApp): boolean {

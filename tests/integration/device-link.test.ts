@@ -113,7 +113,7 @@ it("links a Mac's phone to the account that linked it, over the socket the Mac d
     await expect.poll(() => states.at(-1)).toBe("online");
     const listed = (await (await h.request("/api/device-links", { headers: { cookie: alice.cookie } })).json()) as { links: Array<{ id: string; name: string; online: boolean }> };
     expect(listed.links).toEqual([expect.objectContaining({ id: link.id, name: "Alice's MacBook", online: true })]);
-    expect((await (await h.request("/api/device-links", { headers: { cookie: bob.cookie } })).json())).toEqual({ links: [] });
+    expect((await (await h.request("/api/device-links", { headers: { cookie: bob.cookie } })).json())).toEqual({ links: [], envs: false });
 
     // Status and the task card's picture come from her Mac (a member's responses never carry a "model" field).
     expect(await (await h.request("/api/phone", { headers: { cookie: alice.cookie } })).json()).toEqual({ available: true, reachable: true, device: { serial: "S9", name: "Pixel", android: "16" } });

@@ -1049,6 +1049,7 @@ iOS App 可以把那台 iPhone 的相册、提醒事项和日历交给**在这�
 
 - **打开**：「配置 → iPhone 能力」（只在 iOS App 里有开关）每项一个开关。打开某项时系统才弹出授权（相册 `PHPhotoLibrary` 读写，允许「部分照片」也可用；提醒事项、日历在 iOS 17+ 要完整访问 `requestFullAccessTo…`，更早的系统用 `requestAccess`）；被拒绝或日历只给了「仅添加」时开关保持关闭，显示原因和「去设置开启」（打开本 App 的系统设置页，回来自动刷新）。
   打开第一项时控制台为该账号签发设备令牌（`POST /api/device-links`，`kind: "ios"`，只返回一次，库里只存哈希）交给 App，App 把令牌存进钥匙串（仅本机、首次解锁后可读），连同它属于的账号；最后一项关掉时控制台删除这条连接、App 忘掉令牌。
+  **浏览器和文件夹的开关**：App 自带浏览器和文件夹的版本（0.1.5 起，App 在状态里报 `app` 版本号）且该账号的执行环境已打开（`GET /api/device-links` 的 `envs`，随 `PA_EXEC_ENVS`）时，三项之前多一个「浏览器和 App 的文件夹」开关，与 Android 页一致：它就是这台 iPhone 的连接。打开即连接，不必先开任何一项；关闭则移除连接，三项一并关闭；最后一项关掉时连接保留。旧版 App 或执行环境未打开的账号不显示这个开关，仍是「第一项打开时连接、最后一项关闭时移除」。
   浏览器里的「iPhone 能力」只列出该账号连过的 iPhone（在线与否、在线时已打开哪几项，`GET /api/ios-device`），可移除；没有连过时不显示。
 - **只给登录的账号**：控制台每次知道登录状态时告诉 App 当前账号（`aioDeviceTools` 的 `account`）。只有与令牌同一账号登录时 App 才连接；退出登录时断开；换成别的账号登录时 App 删除令牌并把三项全部关掉，新账号要自己重新打开。别的账号、配件和分享页拿不到这台 iPhone。
 - **连接**：App 自己（不经网页）用 `URLSessionWebSocketTask` 连 `wss://<主站>/api/device-link/connect`，与 Mac App 同一个设备连接协议（`src/control/deviceLink.ts`，连接种类 `ios`，iPhone 的连接从不被当成 Mac，反之亦然），只回答两个入口：`GET /ios/status`（各项开关与系统授权、时区）与 `POST /ios/call`（`{tool, arguments}`）。

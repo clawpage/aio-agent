@@ -77,9 +77,9 @@ it("gives an iPhone's photos, reminders and calendar to the account signed in on
     const { token, link } = (await created.json()) as { token: string; link: { id: string } };
     expect(token).toMatch(/^dl_[A-Za-z0-9_-]{43}$/);
     expect(JSON.stringify(h.ctx.db.prepare("SELECT * FROM device_links").all())).not.toContain(token);
-    expect(await (await h.request("/api/device-links", { headers: { cookie: alice.cookie } })).json()).toEqual({ links: [] });
+    expect(await (await h.request("/api/device-links", { headers: { cookie: alice.cookie } })).json()).toEqual({ links: [], envs: false });
     expect(((await (await h.request("/api/device-links?kind=ios", { headers: { cookie: alice.cookie } })).json()) as { links: Array<{ id: string }> }).links.map((l) => l.id)).toEqual([link.id]);
-    expect(await (await h.request("/api/device-links?kind=ios", { headers: { cookie: bob.cookie } })).json()).toEqual({ links: [] });
+    expect(await (await h.request("/api/device-links?kind=ios", { headers: { cookie: bob.cookie } })).json()).toEqual({ links: [], envs: false });
 
     // Her runtime gets aio_ios (and not the Mac's tools); Bob's and the owner's get nothing.
     native.refresh(aliceCfg);

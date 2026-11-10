@@ -78,6 +78,8 @@ export const app: typeof zh = {
     label: "iPhone abilities",
     description: "Let the AI use this iPhone's Photos, Reminders and Calendar when you ask. Only the account signed in here gets them, and only while the app is open.",
     descriptionWeb: "Turn them on in the Clawpage app on an iPhone, and the AI can use that iPhone's Photos, Reminders and Calendar when you ask. iPhones you linked are listed here.",
+    browser: "Browser and the app's folder",
+    browserHint: "Pages the AI opens show in the app, where you can watch or close them; it asks you before ordering or paying. The folder is also in the Files app",
     abilities: { photos: "Photos", reminders: "Reminders", calendar: "Calendar" },
     hints: {
       photos: "Finds photos and gives the AI the few it needs, downscaled; your library is never uploaded",

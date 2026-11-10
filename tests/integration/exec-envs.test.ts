@@ -470,4 +470,19 @@ describe("rollout without breaking anything", () => {
     expect(envThreadServers(ownerOnly)).toEqual({});
     expect(ownerOnly.ios?.url).toBeTruthy();
   });
+
+  it("tells the console whether the account's agent has the environments, for the phone pages' browser switch", async () => {
+    const alice = await signIn("alice");
+    const envs = async () => ((await (await h.request("/api/device-links?kind=ios", { headers: alice.headers })).json()) as { envs: boolean }).envs;
+    const before = { execEnvs: h.ctx.cfg.execEnvs, execEnvsOwnerOnly: h.ctx.cfg.execEnvsOwnerOnly };
+    try {
+      Object.assign(h.ctx.cfg, { execEnvs: false, execEnvsOwnerOnly: false });
+      expect(await envs()).toBe(false);
+      Object.assign(h.ctx.cfg, { execEnvs: true });
+      expect(await envs()).toBe(true);
+      // PA_EXEC_ENVS=owner: not for an account that is not the owner.
+      Object.assign(h.ctx.cfg, { execEnvsOwnerOnly: true });
+      expect(await envs()).toBe(false);
+    } finally { Object.assign(h.ctx.cfg, before); }
+  });
 });

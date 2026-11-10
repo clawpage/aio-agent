@@ -79,6 +79,8 @@ export const app: typeof zh = {
     label: "iPhone 能力",
     description: "讓 AI 依你的要求使用這支 iPhone 上的相簿、提醒事項和行事曆。只給目前登入的帳號，一站 App 開著時才能用。",
     descriptionWeb: "在 iPhone 上的一站 App 裡打開後，AI 可以依你的要求使用那支 iPhone 的相簿、提醒事項和行事曆。這裡列出你連接過的 iPhone。",
+    browser: "瀏覽器和 App 的資料夾",
+    browserHint: "AI 打開的網頁顯示在 App 裡，你隨時看得到、關得掉；下單、付款這類操作前會先問你。資料夾也在「檔案」App 裡",
     abilities: { photos: "相簿", reminders: "提醒事項", calendar: "行事曆" },
     hints: {
       photos: "尋找照片，把用到的幾張縮小後交給 AI，不會上傳整個相簿",

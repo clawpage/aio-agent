@@ -80,6 +80,8 @@ export const app: typeof zh = {
     label: "iPhone の機能",
     description: "頼んだときに、AI がこの iPhone の写真・リマインダー・カレンダーを使えるようにします。ここでログインしているアカウントだけが対象で、Clawpage アプリを開いている間だけ使えます。",
     descriptionWeb: "iPhone の Clawpage アプリでオンにすると、頼んだときに AI がその iPhone の写真・リマインダー・カレンダーを使えます。連携した iPhone がここに表示されます。",
+    browser: "ブラウザとアプリのフォルダ",
+    browserHint: "AI が開いたページはアプリ内に表示され、いつでも見たり閉じたりできます。注文や支払いの前には確認します。フォルダは「ファイル」アプリにもあります",
     abilities: { photos: "写真", reminders: "リマインダー", calendar: "カレンダー" },
     hints: {
       photos: "写真を探し、必要な数枚だけを縮小して AI に渡します。ライブラリ全体はアップロードされません",

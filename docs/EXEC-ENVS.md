@@ -126,6 +126,13 @@ submit an order or a payment waits for the person's confirmation on the device. 
 App-Bound Domains, which would confine these scripts to our own domains (so no service worker on
 iOS: see "Offline" in `src/ui/tauri/README.md`).
 
+The console turns it on from Settings → "iPhone abilities" (`IphoneSettings.tsx`): for an app that has the
+browser (it says its version, 0.1.5 or later) and an account whose agent has the environments (`envs` in
+`GET /api/device-links`), the page's first switch is the browser and the app's folder, as on the Android
+page. It is the device link: on links this iPhone with no ability on, off removes the link and every ability
+with it. Without that switch (an older app, or the environments off for the account) the link comes with the
+first ability turned on and goes with the last one turned off, as before.
+
 ## The Android app's browser
 
 The same panel in the Android app (`AIBrowser.kt`): a second web view over the console, with a WebView

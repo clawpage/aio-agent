@@ -78,6 +78,8 @@ export const app = {
     label: "iPhone 能力",
     description: "让 AI 按你的要求使用这台 iPhone 上的相册、提醒事项和日历。只给当前登录的账号，一站 App 开着时才能用。",
     descriptionWeb: "在 iPhone 上的一站 App 里打开后，AI 可以按你的要求使用那台 iPhone 的相册、提醒事项和日历。这里列出你连接过的 iPhone。",
+    browser: "浏览器和 App 的文件夹",
+    browserHint: "AI 打开的网页显示在 App 里，你随时能看到、能关掉；下单、付款这类操作前会先问你。文件夹也在「文件」App 里",
     abilities: { photos: "相册", reminders: "提醒事项", calendar: "日历" },
     hints: {
       photos: "查找照片，把用到的几张缩小后交给 AI，不会上传整个相册",
