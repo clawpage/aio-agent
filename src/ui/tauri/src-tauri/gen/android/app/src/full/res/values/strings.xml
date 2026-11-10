@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The side-loaded app's control of this phone (PhoneControl.kt). -->
+<resources>
+    <string name="control_channel">Phone control</string>
+    <string name="control_running_title">AI can use this phone</string>
+    <string name="control_running_text">It opens and operates apps when you ask. Stop ends it and turns wireless debugging off.</string>
+    <string name="control_stop">Stop</string>
+    <string name="control_pair_title">Pair Clawpage Agent with this phone</string>
+    <string name="control_pair_text">In Wireless debugging, tap \"Pair device with pairing code\", then tap \"Enter code\" here and type the six-digit code.</string>
+    <string name="control_pair_again">That did not pair. Open \"Pair device with pairing code\" again and type the new code.</string>
+    <string name="control_pair_label">Six-digit pairing code</string>
+    <string name="control_pair_action">Enter code</string>
+</resources>

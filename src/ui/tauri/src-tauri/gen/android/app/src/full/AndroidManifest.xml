@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The side-loaded app only (AIO_ANDROID_DIST=full, app/build.gradle.kts), merged over src/main's manifest:
+     what PhoneControl.kt needs to run this phone's apps and screen for the agent (docs/EXEC-ENVS.md). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- The pairing code is typed into a notification; the running control shows one with Stop. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Keeps the device link up while other apps are on screen; Stop in its notification ends it. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Granted only by the app itself over its own adb after the person paired it (pm grant), revoked when it is
+         unlinked: turns wireless debugging on to start the helper and off on Stop. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
+    <!-- apps_list names the apps that have a launcher entry. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
+    <application>
+        <service
+            android:name=".ControlService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Lets the person's AI assistant operate this phone's apps while they watch; Stop in the notification ends it." />
+        </service>
+        <!-- The pairing code typed into the notification, and its Stop: only this app's own notifications reach it. -->
+        <receiver
+            android:name=".ControlReceiver"
+            android:exported="false" />
+    </application>
+</manifest>

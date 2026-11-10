@@ -123,10 +123,13 @@ export class EnvRegistry {
     }
   }
 
-  /** The way to reach `known` for `capability`: the device's own app (protocol 1) before an older way. */
+  /**
+   * The way to reach `known` for `capability`: the device's own app (protocol 1, linked as that kind of device) before
+   * another protocol-1 way to it (an Android phone on a Mac's USB), and either before an older way.
+   */
   #best(known: Known, capability: Capability): Route | undefined {
     const able = known.routes.filter((r) => r.capabilities.includes(capability) && r.tunnel.alive);
-    return able.find((r) => r.protocol === "v1") ?? able[0];
+    return able.find((r) => r.protocol === "v1" && r.tunnel.kind === r.kind) ?? able.find((r) => r.protocol === "v1") ?? able[0];
   }
 
   async #send(route: Route, caller: MacCaller, tool: string, args: Record<string, unknown>): Promise<EnvAnswer> {
@@ -229,7 +232,12 @@ export class EnvRegistry {
 
   #drop(tunnel: Tunnel): void {
     this.#reading.delete(tunnel);
-    for (const k of this.#known.get(tunnel.ownerId) ?? []) k.routes = k.routes.filter((r) => r.tunnel !== tunnel);
+    for (const k of this.#known.get(tunnel.ownerId) ?? []) {
+      const before = k.routes.length;
+      k.routes = k.routes.filter((r) => r.tunnel !== tunnel);
+      // Still reachable another way (a phone's app gone, its Mac's USB still there): it offers what that way does.
+      if (k.routes.length && k.routes.length < before) k.capabilities = CAPABILITIES.filter((c) => k.routes.some((r) => r.capabilities.includes(c)));
+    }
   }
 
   #info(k: Known): EnvInfo {

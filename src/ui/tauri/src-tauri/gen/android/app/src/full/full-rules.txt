@@ -1,0 +1,6 @@
+# The side-loaded build only (app/build.gradle.kts). app_process starts the shell helper by its name.
+-keep class ai.clawpage.agent.ShellHelper { public static void main(java.lang.String[]); }
+# Kadb's optional pieces that Android does not have.
+-dontwarn javax.naming.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.conscrypt.**

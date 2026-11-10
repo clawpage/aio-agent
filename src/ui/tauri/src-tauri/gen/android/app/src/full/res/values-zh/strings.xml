@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_channel">控制这台手机</string>
+    <string name="control_running_title">AI 可以使用这台手机</string>
+    <string name="control_running_text">按你的要求打开和操作 App。点「停止」结束，并关闭无线调试。</string>
+    <string name="control_stop">停止</string>
+    <string name="control_pair_title">把一站和这台手机配对</string>
+    <string name="control_pair_text">在「无线调试」里点「使用配对码配对设备」，再点这里的「输入配对码」，填入六位数字。</string>
+    <string name="control_pair_again">没有配对成功。请重新打开「使用配对码配对设备」，填入新的配对码。</string>
+    <string name="control_pair_label">六位配对码</string>
+    <string name="control_pair_action">输入配对码</string>
+</resources>

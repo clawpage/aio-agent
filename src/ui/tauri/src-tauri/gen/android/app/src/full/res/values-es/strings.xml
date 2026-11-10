@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_channel">Control del teléfono</string>
+    <string name="control_running_title">La IA puede usar este teléfono</string>
+    <string name="control_running_text">Abre y usa apps cuando se lo pides. Detener lo termina y desactiva la depuración inalámbrica.</string>
+    <string name="control_stop">Detener</string>
+    <string name="control_pair_title">Vincular Clawpage con este teléfono</string>
+    <string name="control_pair_text">En Depuración inalámbrica, toca \"Vincular dispositivo con código de vinculación\" y luego \"Introducir código\" aquí para escribir los seis dígitos.</string>
+    <string name="control_pair_again">No se vinculó. Abre de nuevo \"Vincular dispositivo con código de vinculación\" y escribe el código nuevo.</string>
+    <string name="control_pair_label">Código de seis dígitos</string>
+    <string name="control_pair_action">Introducir código</string>
+</resources>

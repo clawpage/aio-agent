@@ -62,7 +62,7 @@ export const ENV_TOOLS: readonly Tool[] = [
   tool("calendar_create_event", "Create an event", "calendar", "Add an event. Only when the user asked for it or confirmed it.", { title: { type: "string" }, start: DATE, end: DATE, all_day: { type: "boolean" }, location: { type: "string" }, notes: { type: "string" }, calendar_id: { type: "string" } }, ["title", "start"]),
 
   tool("apps_list", "List apps", "apps", "The apps installed on the phone (names and package names).", {}, [], READ),
-  tool("app_open", "Open an app", "apps", "Start an app on the phone by its package name from apps_list. On a phone with its own app this runs on a hidden screen, so the user can keep using the phone.", { app: { type: "string", description: "Package name" } }, ["app"]),
+  tool("app_open", "Open an app", "apps", "Start an app on the phone by its package name from apps_list. It opens on the phone's screen, where the user sees it.", { app: { type: "string", description: "Package name" } }, ["app"]),
   tool("app_close", "Close an app", "apps", "Stop an app on the phone.", { app: { type: "string" } }, ["app"]),
 
   tool("screen_read", "Read the screen", "screen", "The elements on the phone's screen (text, labels, coordinates). Prefer it to screen_shot.", {}, [], READ),

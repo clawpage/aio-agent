@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_channel">スマホの操作</string>
+    <string name="control_running_title">AI がこのスマホを使えます</string>
+    <string name="control_running_text">頼まれたときにアプリを開いて操作します。「停止」で終了し、ワイヤレス デバッグをオフにします。</string>
+    <string name="control_stop">停止</string>
+    <string name="control_pair_title">Clawpage をこのスマホとペア設定</string>
+    <string name="control_pair_text">「ワイヤレス デバッグ」で「ペア設定コードによるデバイスのペア設定」をタップし、ここの「コードを入力」から 6 桁のコードを入力してください。</string>
+    <string name="control_pair_again">ペア設定できませんでした。「ペア設定コードによるデバイスのペア設定」をもう一度開き、新しいコードを入力してください。</string>
+    <string name="control_pair_label">6 桁のペア設定コード</string>
+    <string name="control_pair_action">コードを入力</string>
+</resources>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_channel">控制這台手機</string>
+    <string name="control_running_title">AI 可以使用這台手機</string>
+    <string name="control_running_text">依你的要求開啟和操作 App。點「停止」結束，並關閉無線偵錯。</string>
+    <string name="control_stop">停止</string>
+    <string name="control_pair_title">將一站與這台手機配對</string>
+    <string name="control_pair_text">在「無線偵錯」中點「使用配對碼配對裝置」，再點這裡的「輸入配對碼」，填入六位數字。</string>
+    <string name="control_pair_again">沒有配對成功。請重新開啟「使用配對碼配對裝置」，填入新的配對碼。</string>
+    <string name="control_pair_label">六位數配對碼</string>
+    <string name="control_pair_action">輸入配對碼</string>
+</resources>

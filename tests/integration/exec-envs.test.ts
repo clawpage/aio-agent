@@ -304,6 +304,37 @@ describe("Android, however it is connected", () => {
     expect(mac.seen.filter((s) => s.path === "/mcp" && s.body.method === "tools/call").at(-1)?.body.params).toEqual({ name: "mobile_click_on_screen_at_coordinates", arguments: { device: "R5CT40ABCDE", x: 7, y: 8 } });
   });
 
+  it("makes the side-loaded app and the same phone on a Mac's USB (protocol 1) one environment by its adb serial", async () => {
+    const alice = await signIn("alice");
+    const runtime = runtimeFor(alice.id, 18113);
+    const agent = executor(runtime);
+    // The Mac app's bridge (bin/mac-env.mjs) names a USB phone by its serial; the APK (PhoneControl.kt) gives the same serial as an alias.
+    const mac = await connect(device(url, await link(alice, "mac", "MacBook"), "Alice's MacBook", ({ method, path, body }) => {
+      if (method === "GET" && path === "/env/manifest") {
+        return { status: 200, body: { protocol: 1, envs: [
+          { deviceId: "MAC-HW-ID", kind: "mac", name: "Alice's MacBook", capabilities: ["browser"], foreground: false },
+          { deviceId: "R5CT40ABCDE", kind: "android", name: "Galaxy S23", capabilities: ["apps", "screen"], foreground: false },
+        ] } };
+      }
+      if (method === "POST" && path === "/env/call") return { status: 200, body: { ok: true, result: { text: `Mac did ${body.tool}` } } };
+      return { status: 404 };
+    }), alice.id, 2);
+    const apk = await connect(androidApp(url, await link(alice, "android", "S23"), "apk"), alice.id, 2);
+    await waitFor(async () => (await registry.list(alice.id)).filter((e) => e.kind === "android").length === 1 || undefined);
+    const phones = (await agent.list()).envs.filter((e) => e.kind === "android");
+    expect(phones).toHaveLength(1);
+    expect(phones[0]!.capabilities).toEqual(expect.arrayContaining(["browser", "files", "apps", "screen"]));
+    await agent.call("screen_read", { env: phones[0]!.id });
+    expect(apk.calls()).toEqual([{ env: "android-id-s23", tool: "screen_read", arguments: {} }]);
+    expect(mac.calls()).toEqual([]);
+    // The app goes (Stop, uninstalled): the same environment carries on over the Mac's USB.
+    apk.ws.close();
+    await waitFor(async () => (await registry.list(alice.id)).find((e) => e.kind === "android" && e.online && !e.capabilities.includes("browser")) || undefined);
+    expect(agent.text(await agent.call("screen_read", { env: phones[0]!.id }))).toContain("Mac did screen_read");
+    expect(mac.calls()).toEqual([{ env: "R5CT40ABCDE", tool: "screen_read", arguments: {} }]);
+    expect((await agent.list()).envs.filter((e) => e.kind === "android").map((e) => e.id)).toEqual([phones[0]!.id]);
+  });
+
   it("takes a file larger than one device message in parts, up to the workspace's limit", async () => {
     const alice = await signIn("alice");
     const runtime = runtimeFor(alice.id, 18112);

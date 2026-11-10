@@ -206,7 +206,7 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   iOS PNGs to opaque RGB (the App Store rejects alpha) and copy them over `src-tauri/icons/ios`
   and `src-tauri/icons/android`.
 
-Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, the Swift sources and their project entries (`AIBrowser`, `DeviceFiles`, `ConsoleOffline`), the Kotlin sources (`DeviceTools`, `AIBrowser`, `DeviceFiles`), the OkHttp dependency and the strings, keyboard, name and icon
+Re-running `tauri ios init` / `android init` overwrites `gen/`: re-apply the native browser sources/framework/dependency, the Swift sources and their project entries (`AIBrowser`, `DeviceFiles`, `ConsoleOffline`), the Kotlin sources (`DeviceTools`, `AIBrowser`, `DeviceFiles`, and `src/play`, `src/full`, `src/fullDebug`, `src/fullTest` with the `AIO_ANDROID_DIST` switch in `app/build.gradle.kts`), the OkHttp dependency and the strings, keyboard, name and icon
 `gen/` changes above.
 
 ## Build and run
@@ -243,6 +243,40 @@ xcrun devicectl device install app --device <identifier> src-tauri/gen/apple/bui
 The team is a personal (free) team, so the profile expires after 7 days and the app then stops
 opening until it is rebuilt and installed again. The first time, the phone has to trust the developer
 in Settings → General → VPN & Device Management.
+
+## The side-loaded Android app
+
+`AIO_ANDROID_DIST=full` builds the side-loaded app (docs/EXEC-ENVS.md, "The side-loaded Android app"): application
+id `ai.clawpage.agent.full`, so it installs beside the Play app, plus `src/full` (its manifest, `PhoneControl.kt`,
+`ShellHelper.kt`, `HelperClient.kt`, `PhoneTools.kt`, `ControlService.kt`, `ControlReceiver.kt`, notification strings
+in five languages, `full-rules.txt` for R8) and the Kadb dependency. Without it Gradle compiles `src/play`'s
+`PhoneControl.kt`, a stand-in that offers nothing, so `DeviceTools.kt` is the same file in both. Debug signing only for
+now; the full build shares the Play build's version (0.1.6 / 1006) and its output path, so build one, then the other.
+
+```bash
+AIO_ANDROID_DIST=full env -u NODE_ENV npm run -- tauri android build --debug --target aarch64 --apk
+./check-android-builds.sh   # both release builds (unsigned): the Play one has nothing of this, the full one no debug-only path
+```
+
+`check-android-builds.sh` builds the Play release APK and checks that its merged manifest asks for exactly
+`play-permissions.txt`, that its runtime classpath has no Kadb (nor its libraries) and that its dex has none of
+`src/full`'s names or strings; then it builds the side-loaded release APK and checks that the shell helper's class
+name survived R8 and that none of the debug-only names (`ai.clawpage.agent.DEBUG_PAIR`, `HelperProbe`, the
+`AIODeviceToolsLink*` extras) are in its dex. Run it after any change to the Gradle files or to `src/full`.
+
+- Debug builds only: `adb -s <emulator> shell am broadcast -a ai.clawpage.agent.DEBUG_PAIR -p ai.clawpage.agent.full
+  --es code <six digits>` hands in a pairing code as the notification's reply would (the pairing dialog stays open),
+  and `src/fullDebug`'s `HelperProbe` knocks on the helper as whoever runs it (the emulator test runs it as the shell
+  user). R8 removes the first from a release build; the second is not compiled into one.
+- The emulator test is `AIO_ANDROID_FULL_E2E=1 npx vitest run tests/devices/android-full.e2e.test.ts` (from the
+  repository root, after the full debug build). The emulator's Wi-Fi must have been allowed for wireless debugging
+  once ("Always allow on this network"). Its comparison with mobile-mcp needs the Mac app's phone runtime
+  (`~/Library/Application Support/ai.clawpage.agent/phone`) and reaches the emulator only, through an adb wrapper.
+- The SPAKE2 port's JVM tests: `(cd src-tauri/gen/android && AIO_ANDROID_DIST=full ./gradlew :app:testUniversalDebugUnitTest)`.
+- Licences of what it adds: Kadb (`com.flyfishxu:kadb-android`, Apache-2.0), Bouncy Castle (MIT-style), Okio and
+  kotlinx-coroutines (Apache-2.0), HiddenApiBypass (Apache-2.0), and `Spake2Context.kt`, ported from BoringSSL's
+  `spake25519.cc` (Apache-2.0). Kadb's own SPAKE2 dependency (`com.github.Flyfish233:spake2-java`) is GPL-3.0 and is
+  excluded; do not let it back in. The repository keeps no third-party notice file yet; the app shows none.
 
 ## Android release signing
 

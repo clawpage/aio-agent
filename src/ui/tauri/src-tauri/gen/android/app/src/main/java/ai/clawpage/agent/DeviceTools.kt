@@ -41,6 +41,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 // issued, and answers the agent's calls while it is on screen; in the background the socket closes and the
 // agent is told to ask the person to open the app, as on the iPhone (DeviceTools.swift).
 //
+// The side-loaded build adds the rest of the phone (PhoneControl.kt in src/full: other apps and the screen through
+// a shell helper it starts over its own wireless debugging) and then keeps the link up in the background; the Play
+// build's PhoneControl adds nothing.
+//
 // Only the console's main frame may talk to it (`aioDeviceTools`, JSON strings with a `seq` its answer
 // repeats, answered with the state). The token is in a file of the app's that backups leave out; the account
 // it belongs to is kept beside it, and a console signed in as anyone else makes the app forget both.
@@ -99,6 +103,7 @@ object DeviceTools {
     fun forget() {
       write(JSONObject().put("asked.calendar", askedCalendar))
       DevicePhotos.remove(null)
+      PhoneControl.forget()
     }
   }
 
@@ -136,6 +141,7 @@ object DeviceTools {
     DeviceFiles.init(app)
     DeviceCalendar.init(app)
     DevicePhotos.init(app)
+    PhoneControl.init(app) { main.post { link.controlChanged() } }
     foreground = true
     ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
       override fun onStart(owner: LifecycleOwner) { foreground = true; link.cameToFront() }
@@ -168,8 +174,11 @@ object DeviceTools {
 
   private fun manifest(): JSONObject {
     val abilities = Ability.values().filter { Store.enabled(it) && usable(it) }.map { it.key }
+    // The browser is a panel over the console: not there while the app is in the background (side-loaded build only; the Play build is offline then).
+    val browser = if (foreground || !PhoneControl.keepsLink) listOf("browser") else emptyList()
     val env = JSONObject().put("deviceId", deviceId).put("kind", "android").put("name", name)
-      .put("capabilities", JSONArray(listOf("browser", "files") + abilities)).put("foreground", foreground)
+      .put("capabilities", JSONArray(browser + listOf("files") + abilities + PhoneControl.capabilities())).put("foreground", foreground)
+    PhoneControl.aliases().takeIf { it.isNotEmpty() }?.let { env.put("aliases", JSONArray(it)) }
     return JSONObject().put("protocol", 1).put("envs", JSONArray().put(env))
   }
 
@@ -216,6 +225,7 @@ object DeviceTools {
         failure("failed", e.message ?: e.javaClass.simpleName)
       }
     }
+    if (tool.startsWith("apps_") || tool.startsWith("app_") || tool.startsWith("screen_")) return PhoneControl.call(tool, args) ?: failure("unknown_tool", tool)
     if (!tool.startsWith("browser_")) return failure("unknown_tool", tool)
     val latch = CountDownLatch(1)
     val answered = AtomicBoolean(false)
@@ -281,7 +291,7 @@ object DeviceTools {
 
     fun connect() {
       val token = Store.token
-      if (!wanted || socket != null || token == null || !foreground) return
+      if (!wanted || socket != null || token == null || !(foreground || PhoneControl.keepsLink)) return
       val request = Request.Builder().url(url)
         .header("Authorization", "Bearer $token")
         .header("x-aio-device-name", URLEncoder.encode(name, "UTF-8").replace("+", "%20"))
@@ -320,12 +330,21 @@ object DeviceTools {
     /** In the background the socket closes, after the calls in flight are answered, so the server says "open the app" at once. */
     fun wentToBack() {
       if (socket == null) return
+      // Unless this phone's apps and screen are the agent's (side-loaded build): then it only says it is not on screen.
+      if (PhoneControl.keepsLink) { event("manifest", manifest()); return }
       if (inflight == 0) finishBackground() else main.postDelayed({ finishBackground() }, 5000)
     }
 
     private fun finishBackground() {
-      if (foreground || socket == null) return
+      if (foreground || socket == null || PhoneControl.keepsLink) return
       disconnect(if (wanted) "offline" else "off")
+    }
+
+    /** The phone's control started or stopped: what it offers changed, and whether the link may stay in the background. */
+    fun controlChanged() {
+      publish()
+      if (socket == null) { if (PhoneControl.keepsLink) { retry = 1; connect() }; return }
+      if (!foreground && !PhoneControl.keepsLink) finishBackground() else event("manifest", manifest())
     }
 
     private fun revoked() {
@@ -336,7 +355,7 @@ object DeviceTools {
     private fun failed(which: WebSocket) {
       if (which !== socket) return
       disconnect(if (wanted) "offline" else "off")
-      if (!wanted || !foreground) return
+      if (!wanted || !(foreground || PhoneControl.keepsLink)) return
       val wait = retry
       retry = minOf(retry * 2, 30)
       main.postDelayed({ connect() }, wait * 1000)
@@ -402,6 +421,7 @@ object DeviceTools {
       getJSONObject("photos").put("shared", DevicePhotos.count)
     })
     .put("app", try { app.packageManager.getPackageInfo(app.packageName, 0).versionName ?: "" } catch (_: Exception) { "" })
+    .also { state -> PhoneControl.status()?.let { state.put("control", it) } }
 
   private fun onConsole(webView: WebView): Boolean = Uri.parse(webView.url ?: "").let { it.scheme == "https" && it.host == CONSOLE_HOST }
 
@@ -469,6 +489,7 @@ object DeviceTools {
           changed()
         }
       }
+      "control" -> if (!PhoneControl.fromConsole(body, activity?.get(), answer)) refuse("unknown")
       "settings" -> {
         app.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.packageName, null)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         answer()
