@@ -121,6 +121,12 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 原生改动：App 应答设备协议（`/env/manifest`、`/env/call`），带 AI 用的浏览器面板（`AIBrowser.swift`）和「AI Files」文件夹（`DeviceFiles.swift`）；去掉 App-Bound Domains，
   iOS 不再用 service worker，取不到控制台时显示原生提示并自动重试（`ConsoleOffline.swift`）。见 `docs/EXEC-ENVS.md` 与 `src/ui/tauri/README.md`「Offline」。
 - 构建 `0.1.5 (0.1.5.1)`，`altool` 上传成功（Delivery UUID `6d703773-6c29-4d0c-a7f7-c81f5531c08f`），处理为 VALID 后加入外部测试组、填中英文「测试内容」并提交 Beta 审核，
-  状态 `WAITING_FOR_REVIEW`；内部测试已可安装。
+  随后通过 Beta 审核（`IN_BETA_TESTING`）；内部测试已可安装。
 - 只在模拟器上验过（`tests/devices/ios.e2e.test.ts` 6 项、`-AIOConsoleFailFirst 1` 的无网提示）；真机的飞行模式冷启动、浏览器面板和文件夹未验。
   服务端 `PA_EXEC_ENVS` 仍关闭，浏览器与文件在打开前不会被执行器用到。未新建 App Store 版本，未提交商店审核。
+
+## 2026-11-09 0.1.5 (0.1.5.2)：AI 浏览器小窗右上角、可全屏（TestFlight）
+
+- 原生改动：AI 用的浏览器小窗移到右上角，轮到用户操作时可全屏，配色跟随控制台深浅色（`AIBrowser.swift`）。配套的服务端改动（手机中途离开时等待并通知、回来后自动继续）已在控制面上线。
+- 构建 `0.1.5 (0.1.5.2)`（`--build-number 2`），`altool` 上传成功（Delivery UUID `c3d25f1b-e9aa-4d21-8e6e-860ffd8a36c1`），已加入外部测试组、填中英文「测试内容」，同版本号无需再审，状态 `IN_BETA_TESTING`。
+- 只在模拟器上验过（`tests/devices/ios.e2e.test.ts` 6 项，深浅色截图）；真机未验。Android 暂无测试渠道（Play 0.1.6 未发）。
