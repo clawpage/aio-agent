@@ -147,8 +147,9 @@ longer than that answers offline at once, with no notification. A Mac is never w
 ## The Android app's browser
 
 The same panel in the Android app (`AIBrowser.kt`): a second web view over the console, with a WebView
-profile of its own (its sign-ins are apart from the console's), shown as a small live window that opens
-full screen, with Minimize and Close; Back goes back in it or makes it small again. Android's WebView
+profile of its own (its sign-ins are apart from the console's), shown as a small live window at the top right (under the console's header) that opens
+full screen (the whole screen under the status bar; what the agent asks of the person is two lines above
+the page, all of it on a tap), with Minimize and Close; Back goes back in it or makes it small again. It wears the console's colours in both themes, the same on iPhone: the small window's outline and the dot by the title are indigo while the agent works and amber when it is the person's turn, when the ask sits on soft amber and Done is one amber button at the bottom. Android's WebView
 has no isolated script world, so the scripts run in the page's own world and leave nothing behind: each is
 a function that returns, with no global, attribute, node or patched prototype. An element's ref is its
 place in the same enumeration of the page's controls on every call, checked against a fingerprint from

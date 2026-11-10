@@ -295,11 +295,35 @@ final class AIBrowser: NSObject, WKNavigationDelegate {
  * the phone's full size either way (the small window shows it scaled down), so what the agent reads and
  * pictures does not change with it.
  */
+/** The console's colors (`src/ui/src/theme.css`): dark and light, by the system's appearance. */
+private enum Theme {
+    private static func pair(_ dark: UInt32, _ light: UInt32) -> UIColor {
+        UIColor { traits in
+            let hex = traits.userInterfaceStyle == .light ? light : dark
+            return UIColor(red: CGFloat((hex >> 16) & 0xff) / 255, green: CGFloat((hex >> 8) & 0xff) / 255, blue: CGFloat(hex & 0xff) / 255, alpha: 1)
+        }
+    }
+    static let surface = pair(0x1a1823, 0xffffff)
+    static let border = pair(0x2d2939, 0xe6e3ee)
+    static let text = pair(0xecebf3, 0x1d1b26)
+    static let textDim = pair(0x9d98ae, 0x6b6878)
+    /** Indigo: the AI is working. */
+    static let ai = pair(0x8f86ff, 0x5a4fe0)
+    /** Amber: the person's turn. */
+    static let you = pair(0xffb547, 0xa15f00)
+    static let youSoft = pair(0x3a2c16, 0xfff3df)
+    static let onYou = pair(0x1b1200, 0xffffff)
+}
+
 private final class BrowserPanel: UIView {
     private let webView: WKWebView
     private let holder = UIView()
     private let bar = UIStackView()
+    private let barLine = UIView()
+    private let dot = UIView()
+    private let askBox = UIView()
     private let banner = UILabel()
+    private let doneBox = UIView()
     private let doneButton = UIButton(type: .system)
     private var expanded = false
     private var onDone: (() -> Void)?
@@ -308,40 +332,62 @@ private final class BrowserPanel: UIView {
     init(webView: WKWebView) {
         self.webView = webView
         super.init(frame: .zero)
-        backgroundColor = .systemBackground
+        backgroundColor = Theme.surface
         layer.cornerRadius = 14
-        layer.borderWidth = 1
-        layer.borderColor = UIColor.systemIndigo.withAlphaComponent(0.6).cgColor
+        layer.borderWidth = 1.5
         clipsToBounds = true
 
+        // The dot says whose turn it is, as the console does: indigo while the AI works, amber when it asks.
+        dot.layer.cornerRadius = 4
+        dot.widthAnchor.constraint(equalToConstant: 8).isActive = true
+        dot.heightAnchor.constraint(equalToConstant: 8).isActive = true
         let title = UILabel()
         title.text = say("title")
-        title.font = .preferredFont(forTextStyle: .subheadline)
-        let minimize = UIButton(type: .system)
-        minimize.setTitle(say("minimize"), for: .normal)
-        minimize.addAction(UIAction { [weak self] _ in self?.show(expanded: false) }, for: .touchUpInside)
-        let close = UIButton(type: .system)
-        close.setTitle(say("close"), for: .normal)
-        close.addAction(UIAction { [weak self] _ in self?.removeFromSuperview() }, for: .touchUpInside)
+        title.font = .systemFont(ofSize: 15, weight: .semibold)
+        title.textColor = Theme.text
+        let icon = { (name: String, label: String, then: @escaping () -> Void) -> UIButton in
+            let button = UIButton(type: .system)
+            button.setImage(UIImage(systemName: name, withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)), for: .normal)
+            button.tintColor = Theme.textDim
+            button.accessibilityLabel = label
+            button.widthAnchor.constraint(equalToConstant: 40).isActive = true
+            button.addAction(UIAction { _ in then() }, for: .touchUpInside)
+            return button
+        }
         bar.axis = .horizontal
-        bar.spacing = 12
-        bar.layoutMargins = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        bar.alignment = .center
+        bar.spacing = 8
+        bar.layoutMargins = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 6)
         bar.isLayoutMarginsRelativeArrangement = true
+        bar.addArrangedSubview(dot)
         bar.addArrangedSubview(title)
         bar.addArrangedSubview(UIView())
-        bar.addArrangedSubview(minimize)
-        bar.addArrangedSubview(close)
+        bar.addArrangedSubview(icon("chevron.down", say("minimize")) { [weak self] in self?.show(expanded: false) })
+        bar.addArrangedSubview(icon("xmark", say("close")) { [weak self] in self?.removeFromSuperview() })
+        barLine.backgroundColor = Theme.border
 
-        banner.numberOfLines = 0
+        // Two lines of what is asked, so the page keeps the screen; a tap shows all of it.
+        banner.numberOfLines = 2
+        banner.isUserInteractionEnabled = true
+        banner.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(askTapped)))
         banner.font = .preferredFont(forTextStyle: .footnote)
-        banner.backgroundColor = UIColor.systemOrange.withAlphaComponent(0.15)
+        banner.textColor = Theme.text
+        askBox.backgroundColor = Theme.youSoft
+        askBox.addSubview(banner)
+        // The person's turn: the one filled amber control on the screen.
         doneButton.setTitle(say("done"), for: .normal)
+        doneButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .semibold)
+        doneButton.setTitleColor(Theme.onYou, for: .normal)
+        doneButton.backgroundColor = Theme.you
+        doneButton.layer.cornerRadius = 12
+        doneBox.backgroundColor = Theme.surface
+        doneBox.addSubview(doneButton)
         doneButton.addAction(UIAction { [weak self] _ in let done = self?.onDone; self?.onDone = nil; self?.setAsk(nil); done?() }, for: .touchUpInside)
 
         holder.clipsToBounds = true
         webView.layer.anchorPoint = .zero
         holder.addSubview(webView)
-        [bar, banner, holder, doneButton].forEach(addSubview)
+        [bar, barLine, askBox, holder, doneBox].forEach(addSubview)
         setAsk(nil)
         addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(tapped)))
     }
@@ -361,35 +407,61 @@ private final class BrowserPanel: UIView {
     }
 
     private func setAsk(_ reason: String?) {
-        banner.text = reason.map { "  \(say("asks")) \($0)  " }
-        banner.isHidden = reason == nil
-        doneButton.isHidden = reason == nil
+        banner.text = reason.map { "\(say("asks")) \($0)" }
+        banner.numberOfLines = 2
+        askBox.isHidden = reason == nil
+        doneBox.isHidden = reason == nil
+        tint()
         setNeedsLayout()
+    }
+
+    private func tint() {
+        let turn = askBox.isHidden ? Theme.ai : Theme.you
+        dot.backgroundColor = turn
+        layer.borderColor = turn.resolvedColor(with: traitCollection).cgColor
+    }
+
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        tint()
     }
 
     @objc private func tapped() { if !expanded { show(expanded: true) } }
 
-    /** The page's own size: the screen's, less the margins of the full-screen panel and its bar. */
+    @objc private func askTapped() { banner.numberOfLines = banner.numberOfLines == 0 ? 2 : 0; setNeedsLayout() }
+
+    /** The page's own size: the screen's under the status bar, less the panel's bar. */
     private var pageSize: CGSize {
         let window = self.window ?? superview
         let bounds = window?.bounds ?? UIScreen.main.bounds
         let safe = window?.safeAreaInsets ?? .zero
-        return CGSize(width: bounds.width - 16, height: bounds.height - safe.top - safe.bottom - 16 - 44)
+        return CGSize(width: bounds.width, height: bounds.height - safe.top - 44)
     }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         var y: CGFloat = 0
         bar.isHidden = !expanded
-        if expanded { bar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 44); y = 44 }
-        let showAsk = expanded && !banner.isHidden
-        if showAsk {
-            let height = banner.sizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height + 12
-            banner.frame = CGRect(x: 0, y: y, width: bounds.width, height: height)
-            y += height
+        barLine.isHidden = !expanded
+        if expanded {
+            bar.frame = CGRect(x: 0, y: 0, width: bounds.width, height: 44)
+            barLine.frame = CGRect(x: 0, y: 44 - 1 / UIScreen.main.scale, width: bounds.width, height: 1 / UIScreen.main.scale)
+            y = 44
         }
-        let bottom: CGFloat = expanded && !doneButton.isHidden ? 48 : 0
-        doneButton.frame = CGRect(x: 0, y: bounds.height - bottom, width: bounds.width, height: bottom)
+        let showAsk = expanded && !askBox.isHidden
+        askBox.alpha = showAsk ? 1 : 0
+        if showAsk {
+            let height = banner.sizeThatFits(CGSize(width: bounds.width - 32, height: .greatestFiniteMagnitude)).height
+            banner.frame = CGRect(x: 16, y: 10, width: bounds.width - 32, height: height)
+            askBox.frame = CGRect(x: 0, y: y, width: bounds.width, height: height + 20)
+            y += height + 20
+        }
+        // The button sits above the home indicator.
+        let showDone = expanded && !doneBox.isHidden
+        let bottom: CGFloat = showDone ? 68 + (window?.safeAreaInsets.bottom ?? 0) : 0
+        doneBox.alpha = showDone ? 1 : 0
+        doneBox.frame = CGRect(x: 0, y: bounds.height - bottom, width: bounds.width, height: bottom)
+        doneButton.frame = CGRect(x: 16, y: 10, width: bounds.width - 32, height: 48)
         holder.frame = CGRect(x: 0, y: y, width: bounds.width, height: bounds.height - y - bottom)
         let page = pageSize
         webView.transform = .identity
@@ -408,10 +480,12 @@ private final class BrowserPanel: UIView {
         let safe = window.safeAreaInsets
         let bounds = window.bounds
         UIView.animate(withDuration: 0.25) {
-            // Full screen, or a live thumbnail of the page above the message box.
+            // The whole screen under the status bar, or a live thumbnail of the page at the top right, under the console's header.
             self.frame = expanded
-                ? CGRect(x: 8, y: safe.top + 8, width: bounds.width - 16, height: bounds.height - safe.top - safe.bottom - 16)
-                : CGRect(x: bounds.width - 128 - 12, y: bounds.height - safe.bottom - 330, width: 128, height: 220)
+                ? CGRect(x: 0, y: safe.top, width: bounds.width, height: bounds.height - safe.top)
+                : CGRect(x: bounds.width - 128 - 12, y: safe.top + 52, width: 128, height: 220)
+            self.layer.cornerRadius = expanded ? 0 : 14
+            self.layer.borderWidth = expanded ? 0 : 1.5
             self.layoutIfNeeded()
         }
         // Out of the way once the agent has not used it for a while.

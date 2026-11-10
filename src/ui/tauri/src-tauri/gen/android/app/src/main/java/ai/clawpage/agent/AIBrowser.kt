@@ -5,7 +5,6 @@ import android.app.Activity
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Handler
@@ -565,8 +564,25 @@ object AIBrowser {
 @SuppressLint("ViewConstructor")
 private class BrowserPanel(private val activity: Activity, private val webView: WebView) : FrameLayout(activity) {
   private val banner = TextView(activity)
-  private val doneButton = Button(activity)
+  private val doneButton = Button(activity, null, android.R.attr.borderlessButtonStyle)
+  private val doneBox = FrameLayout(activity)
+  private val dot = View(activity)
+  private val frame = GradientDrawable()
+  private val outline = GradientDrawable()
+  // The console's colors (src/ui/src/theme.css), dark or light by the system's setting.
+  private val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+  private fun tone(dark: Long, light: Long) = (0xff000000L or (if (night) dark else light)).toInt()
+  private val surface = tone(0x1a1823, 0xffffff)
+  private val hairline = tone(0x2d2939, 0xe6e3ee)
+  private val ink = tone(0xecebf3, 0x1d1b26)
+  private val inkDim = tone(0x9d98ae, 0x6b6878)
+  /** Indigo: the AI is working. Amber: the person's turn. */
+  private val ai = tone(0x8f86ff, 0x5a4fe0)
+  private val you = tone(0xffb547, 0xa15f00)
+  private val youSoft = tone(0x3a2c16, 0xfff3df)
+  private val onYou = tone(0x1b1200, 0xffffff)
   private var expanded = false
+  private var turn = ai
   private var onDone: (() -> Unit)? = null
   private val hide = Runnable { close() }
   private val back = object : OnBackPressedCallback(false) {
@@ -576,43 +592,56 @@ private class BrowserPanel(private val activity: Activity, private val webView: 
   private fun dp(value: Int) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value.toFloat(), resources.displayMetrics)
 
   init {
-    val night = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
-    val surface = if (night) Color.rgb(0x1c, 0x1b, 0x22) else Color.WHITE
-    val ink = if (night) Color.rgb(0xec, 0xea, 0xf4) else Color.rgb(0x1c, 0x1b, 0x22)
     val card = LinearLayout(activity).apply {
       orientation = LinearLayout.VERTICAL
-      background = GradientDrawable().apply { cornerRadius = dp(14); setColor(surface); setStroke(dp(1).toInt(), Color.argb(0x99, 0x5b, 0x4b, 0xd6)) }
+      background = frame.apply { setColor(surface) }
+      // Over the page, which would cover a stroke on the background.
+      foreground = outline
       clipToOutline = true
       elevation = dp(8)
     }
     val bar = LinearLayout(activity).apply {
       orientation = LinearLayout.HORIZONTAL
       gravity = Gravity.CENTER_VERTICAL
-      setPadding(dp(14).toInt(), 0, dp(4).toInt(), 0)
+      setPadding(dp(16).toInt(), 0, dp(4).toInt(), 0)
     }
-    bar.addView(TextView(activity).apply { setText(R.string.aio_browser_title); setTextColor(ink); textSize = 15f }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+    // The dot says whose turn it is, as the console does.
+    bar.addView(dot, LinearLayout.LayoutParams(dp(8).toInt(), dp(8).toInt()).apply { marginEnd = dp(8).toInt() })
+    bar.addView(TextView(activity).apply { setText(R.string.aio_browser_title); setTextColor(ink); textSize = 15f; typeface = android.graphics.Typeface.DEFAULT_BOLD }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     val action = { label: Int, then: () -> Unit ->
-      bar.addView(Button(activity, null, android.R.attr.borderlessButtonStyle).apply { setText(label); isAllCaps = false; setOnClickListener { then() } })
+      bar.addView(Button(activity, null, android.R.attr.borderlessButtonStyle).apply { setText(label); isAllCaps = false; textSize = 14f; setTextColor(inkDim); minWidth = 0; minimumWidth = 0; setOnClickListener { then() } })
     }
     action(R.string.aio_browser_minimize) { show(expanded = false) }
     action(R.string.aio_browser_close) { close() }
-    banner.setPadding(dp(14).toInt(), dp(8).toInt(), dp(14).toInt(), dp(8).toInt())
+    banner.setPadding(dp(16).toInt(), dp(10).toInt(), dp(16).toInt(), dp(10).toInt())
+    banner.textSize = 13f
     banner.setTextColor(ink)
-    banner.setBackgroundColor(Color.argb(0x33, 0xf2, 0xa1, 0x2c))
+    // Two lines of what is asked, so the page keeps the screen; a tap shows all of it.
+    banner.maxLines = 2
+    banner.ellipsize = android.text.TextUtils.TruncateAt.END
+    banner.setOnClickListener { banner.maxLines = if (banner.maxLines == 2) Int.MAX_VALUE else 2 }
+    banner.setBackgroundColor(youSoft)
+    // The person's turn: the one filled amber control on the screen.
     doneButton.setText(R.string.aio_browser_done)
     doneButton.isAllCaps = false
+    doneButton.textSize = 16f
+    doneButton.typeface = android.graphics.Typeface.DEFAULT_BOLD
+    doneButton.setTextColor(onYou)
+    doneButton.background = GradientDrawable().apply { cornerRadius = dp(12); setColor(you) }
+    doneBox.setBackgroundColor(surface)
+    doneBox.addView(doneButton, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48).toInt()).apply { setMargins(dp(16).toInt(), dp(10).toInt(), dp(16).toInt(), dp(10).toInt()) })
     doneButton.setOnClickListener { val done = onDone; onDone = null; setAsk(null); done?.invoke() }
     card.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(48).toInt()))
+    card.addView(View(activity).apply { setBackgroundColor(hairline) }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 1))
     card.addView(banner, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     card.addView(webView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-    card.addView(doneButton, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    card.addView(doneBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     addView(card, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
     setAsk(null)
     // Clear of the status and navigation bars (the window is edge to edge).
     ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
       val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-      val m = dp(8).toInt()
-      v.setPadding(bars.left + m, bars.top + m, bars.right + m, bars.bottom + m)
+      v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
       insets
     }
     addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> place(animate = false) }
@@ -621,17 +650,26 @@ private class BrowserPanel(private val activity: Activity, private val webView: 
 
   private fun setAsk(reason: String?) {
     banner.text = reason?.let { "${resources.getString(R.string.aio_browser_asks)} $it" }
+    banner.maxLines = 2
     banner.visibility = if (reason == null) View.GONE else View.VISIBLE
-    doneButton.visibility = banner.visibility
+    doneBox.visibility = banner.visibility
+    val turn = if (reason == null) ai else you
+    dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(turn) }
+    this.turn = turn
+    place(animate = false)
   }
 
-  /** Full screen, or a live thumbnail of the page above the message box, at the bottom right. */
+  /** Full screen, or a live thumbnail of the page at the top right, under the console's header. */
   private fun place(animate: Boolean) {
     val scale = if (expanded || width == 0) 1f else dp(128) / width
+    // Full screen has no frame; the small window's outline is drawn thick enough to survive the scaling.
+    for (shape in listOf(frame, outline)) shape.cornerRadius = if (expanded) 0f else dp(12) / scale
+    outline.setStroke(if (expanded) 0 else (dp(2) / scale).toInt(), turn)
     pivotX = width.toFloat()
-    pivotY = height.toFloat()
-    val tx = if (expanded) 0f else -dp(4)
-    val ty = if (expanded) 0f else -dp(110)
+    pivotY = 0f
+    val tx = if (expanded) 0f else -dp(12)
+    // The scaled view keeps (a scaled) status-bar padding of its own above the card.
+    val ty = if (expanded) 0f else paddingTop * (1 - scale) + dp(52)
     animate().cancel()
     // Not before the first layout: there is no size to scale from yet (the layout that follows places it).
     if (animate && width > 0) animate().scaleX(scale).scaleY(scale).translationX(tx).translationY(ty).setDuration(250).start()
