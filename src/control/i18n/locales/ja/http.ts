@@ -111,6 +111,9 @@ export const http: typeof zh = {
     browserBody: "Clawpage Agent を開いてブラウザの操作を引き継いでください。",
     envAway: "タスクが Clawpage Agent であなたを待っています",
     envAwayBody: (name: string) => `AI が ${name} を使用中です。アプリに戻ると自動で続行します。`,
+    inkLow: "プリンターのインクが少なくなっています",
+    inkLevel: (name: string, level: number) => `${({"black":"ブラック","cyan":"シアン","magenta":"マゼンタ","yellow":"イエロー"} as Record<string, string>)[name.toLowerCase()] ?? name} ${level}%`,
+    inkLowBody: (inks: string[], threshold: number) => `${inks.join("、")}。設定した ${threshold}% のラインに達しました。`,
   },
   tasks: {
     badFilter: "絞り込み条件が無効です",

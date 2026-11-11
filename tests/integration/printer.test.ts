@@ -25,6 +25,10 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
   const envelope = { "media-size": { "x-dimension": 10477, "y-dimension": 24130 }, "media-top-margin": 300, "media-bottom-margin": 300, "media-left-margin": 300, "media-right-margin": 300, "media-type": "envelope", "media-source": "manual" };
   let trays: unknown[] = [...tray(10160, 15240, "photographic-high-gloss", "main"), ...tray(21590, 27940, "stationery", "alternate")];
   let dropPrintJob = false;
+  let levels = [99, 40];
+  // What the ink watch sent, and how many devices take a notification.
+  const alerted: Array<{ userId: string; low: string; threshold: number }> = [];
+  let devices = 0;
   const upstream = http.createServer(async (req, res) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(chunk as Buffer);
@@ -39,7 +43,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
             [TAG.keyword, "printer-state-reasons", printer.reasons],
             [TAG.text, "printer-make-and-model", "EPSON WF-4830 Series"],
             [TAG.name, "marker-names", ["Black ink", "Cyan ink"]],
-            [TAG.integer, "marker-levels", [99, 40]],
+            [TAG.integer, "marker-levels", levels],
             [TAG.keyword, "media-ready", ["na_index-4x6_4x6in", "na_letter_8.5x11in"]],
             ...(trays.length ? [[TAG.begCollection, "media-col-ready", trays] as never] : []),
           ])
@@ -56,7 +60,8 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
       return { bytes: RASTER, pages: opts.pages.length || 3 };
     },
   });
-  const printerGateway = new PrinterGateway({ port: 0, log: h.ctx.log, printerUri, accounts: ["owner"], workspace: "/home/gem/workspace", usernameOf: (id) => USERS[id] ?? null, filesFor, db: h.ctx.db });
+  const printerGateway = new PrinterGateway({ port: 0, log: h.ctx.log, printerUri, accounts: ["owner"], workspace: "/home/gem/workspace", usernameOf: (id) => USERS[id] ?? null, filesFor, db: h.ctx.db,
+    alerts: { devices: () => devices, send: async (userId, low, threshold) => (alerted.push({ userId, low: low.map((ink) => `${ink.name} ${ink.level}`).join(","), threshold }), devices) } });
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, printerGateway);
   await gateway.start();
@@ -84,7 +89,7 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     const init = await rpc(owner.printer!.url, { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18" } });
     expect((await init.json()).result).toMatchObject({ serverInfo: { name: "aio_printer" }, instructions: PRINTER_POLICY });
     const tools = (await (await rpc(owner.printer!.url, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json()).result.tools as Array<{ name: string }>;
-    expect(tools.map((t) => t.name)).toEqual(["printer_status", "print_file", "print_history"]);
+    expect(tools.map((t) => t.name)).toEqual(["printer_status", "print_file", "print_history", "ink_alert"]);
     expect((await call("print_history")).content[0]!.text).toBe("Ink now: Black 99%, Cyan 40%\nNo print jobs recorded yet.");
 
     const status = await call("printer_status");
@@ -218,6 +223,44 @@ it("offers the home printer to the listed accounts only, rasterizing in the acco
     expect(history.join("\n")).not.toContain("secret.pdf");
     expect((await call("print_history", { limit: 2 })).content[0]!.text.split("\n")).toHaveLength(4);
     expect((await call("print_history", { limit: 0 })).isError).toBe(true);
+
+    // Low ink is watched by the server itself: an alert is a setting, and reading the printer is the check.
+    expect((await call("printer_status")).content[0]!.text).toContain("Ink alert: off");
+    expect((await call("ink_alert")).content[0]!.text).toBe("Ink alert: off\nInk now: Black 99%, Cyan 40%");
+    expect((await call("ink_alert", { threshold: 100 })).isError).toBe(true);
+    const set = (await call("ink_alert", { threshold: 20 })).content[0]!.text;
+    expect(set).toContain("Ink alert: the user is notified once a color is at or below 20%");
+    expect(set).toContain("no schedule is needed");
+    expect(set).toContain("None of the user's devices has notifications turned on");
+    await printerGateway.checkInk();
+    expect(alerted).toEqual([]);
+    // Cyan reaches the line with nobody to tell: it stays due until a device has notifications on.
+    levels = [99, 20];
+    await printerGateway.checkInk();
+    expect(alerted).toEqual([{ userId: "owner_1", low: "Cyan 20", threshold: 20 }]);
+    devices = 1;
+    await printerGateway.checkInk();
+    await printerGateway.checkInk();
+    expect(alerted).toHaveLength(2);
+    expect((await call("printer_status")).content[0]!.text).toMatch(/Ink alert: .* at or below 20%; already notified about Cyan on \d{4}-/);
+    // Another color follows: one more notification, naming everything that is low; any read of the printer checks.
+    levels = [15, 12];
+    await call("print_history");
+    await printerGateway.checkInk();
+    expect(alerted.slice(2)).toEqual([{ userId: "owner_1", low: "Black 15,Cyan 12", threshold: 20 }]);
+    // A new cyan cartridge re-arms that color only.
+    levels = [15, 100];
+    await printerGateway.checkInk();
+    levels = [14, 19];
+    await printerGateway.checkInk();
+    expect(alerted.slice(3)).toEqual([{ userId: "owner_1", low: "Black 14,Cyan 19", threshold: 20 }]);
+    // Turned off: nothing more is sent, and the printer is not even read.
+    expect((await call("ink_alert", { threshold: 0 })).content[0]!.text).toContain("Ink alert: off");
+    levels = [1, 1];
+    const reads = seen.length;
+    await printerGateway.checkInk();
+    expect(seen).toHaveLength(reads);
+    expect(alerted).toHaveLength(4);
   } finally {
     gateway.close();
     upstream.closeAllConnections();

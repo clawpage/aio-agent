@@ -555,6 +555,15 @@ CREATE TABLE IF NOT EXISTS print_jobs (
   ink TEXT NOT NULL
 );
 
+-- An account's standing request to be told when the printer's ink runs low; notified lists the colours already reported.
+CREATE TABLE IF NOT EXISTS printer_ink_alerts (
+  owner_id TEXT PRIMARY KEY,
+  threshold INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  notified TEXT NOT NULL DEFAULT '[]',
+  notified_at INTEGER
+);
+
 `;
 
 export function openDb(dbPath: string): Db {

@@ -112,6 +112,9 @@ export const http = {
     browserBody: "打开一站接管浏览器。",
     envAway: "任务在等你回到一站",
     envAwayBody: (name: string) => `AI 正在使用 ${name}，回到 App 后会自动继续。`,
+    inkLow: "打印机墨水不多了",
+    inkLevel: (name: string, level: number) => `${({"black":"黑色","cyan":"青色","magenta":"品红","yellow":"黄色"} as Record<string, string>)[name.toLowerCase()] ?? name} ${level}%`,
+    inkLowBody: (inks: string[], threshold: number) => `${inks.join("、")}，已到你设的 ${threshold}% 提醒线。`,
   },
   tasks: {
     badFilter: "筛选条件无效",

@@ -21,6 +21,8 @@ const TIMEOUT_MS = 300_000;
 const MAX_COPIES = 20;
 const HISTORY_DEFAULT = 10;
 const HISTORY_MAX = 50;
+/** How often the ink is read for the accounts that asked to be told when it runs low. */
+const INK_WATCH_MS = 10 * 60_000;
 const MAX_SOURCE_BYTES = 100 * 1024 * 1024;
 const PDF = /\.pdf$/i;
 const PICTURE = /\.(png|jpe?g|webp|gif|bmp|tiff?)$/i;
@@ -172,7 +174,25 @@ const TOOLS = [
       properties: { limit: { type: "integer", minimum: 1, maximum: HISTORY_MAX, description: `How many jobs to list, default ${HISTORY_DEFAULT}` } },
     },
   },
+  {
+    name: "ink_alert",
+    description:
+      "Have the system watch the home printer's ink and notify the user once any color falls to or below a level. The watching is done by the server itself, around the clock, at no usage cost: " +
+      "use this whenever the user asks to be told or reminded when ink runs low, and never create a schedule for it. The user is notified once per color, and again after that cartridge was replaced and runs low again. Call it without arguments to see the current setting.",
+    inputSchema: {
+      type: "object",
+      properties: { threshold: { type: "integer", minimum: 0, maximum: 99, description: "Notify at or below this percentage, 1 to 99; 0 turns the alert off; omit to only read the current setting" } },
+    },
+  },
 ];
+
+/** What the ink watch needs from the rest of the server: a way to reach the account's devices. */
+export interface InkAlerts {
+  /** Tell the account which colors are low; resolves to how many devices took the notification. */
+  send(userId: string, low: Array<{ name: string; level: number }>, threshold: number): Promise<number>;
+  /** How many devices of the account have notifications on. */
+  devices(userId: string): number;
+}
 
 /** Thread-level MCP wiring for a Codex executor. */
 export function printerThreadServers(cfg: Config): Record<string, unknown> {
@@ -188,7 +208,7 @@ export const PRINTER_POLICY =
   "The home printer is connected (aio_printer): when the user wants a file, photo, web page, or a document you made printed, print it directly with print_file; do not make the user print it themselves. " +
   "It only accepts PDFs and images in the workspace: convert Word, Excel, PPT, text, and so on to PDF in the sandbox first (e.g. soffice --headless --convert-to pdf), save web pages as PDF first, then print the converted file. " +
   "Print only when the user asks to print; follow what the user said for copies, pages, one- or two-sided, color or black and white, and paper, and if they did not say, use 1 copy, one-sided, color, on plain paper. The printer can hold several papers at once (e.g. Letter plain paper and 4x6 photo paper): printer_status lists them; pass paper to print_file when the user names a size or wants a photo print on photo paper, and when it is unclear which paper they mean, ask. Photo paper prints at high quality on its own; pass quality only when the user asks for finer or faster printing than that default. Pass borderless only when the user asks for a borderless (edge-to-edge, no white border) print. Confirm with the user first for more than 20 pages or multiple copies. " +
-  "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer. print_history lists what was printed and the ink levels at each job.";
+  "You can check the state with printer_status before and after printing; tell the user truthfully when it is out of paper, has a paper jam, or is low on ink. When the tool says the outcome is uncertain, do not print again automatically; first ask the user to look at the printer. print_history lists what was printed and the ink levels at each job. When the user asks to be told or reminded when ink runs low, set ink_alert: the server then watches the ink itself and notifies them; do not create a schedule for that.";
 
 /** Turning one account's workspace file into printer pages. */
 export interface PrintFiles {
@@ -257,6 +277,10 @@ export class PrinterGateway {
   #usernameOf: (userId: string) => string | null;
   #filesFor: (userId: string) => Promise<PrintFiles>;
   #db: Db | undefined;
+  #alerts: InkAlerts | undefined;
+  #watch: NodeJS.Timeout | undefined;
+  /** One ink check at a time, so a level is never reported twice. */
+  #checking: Promise<void> = Promise.resolve();
   /** capability token -> account */
   #tokens = new Map<string, { userId: string; username: string }>();
   /** One job at a time: the printer takes a single document per job. */
@@ -273,6 +297,8 @@ export class PrinterGateway {
     filesFor: (userId: string) => Promise<PrintFiles>;
     /** Where the jobs are remembered; without it there is no history. */
     db?: Db;
+    /** How a low ink level reaches the account; without it ink_alert is not offered. */
+    alerts?: InkAlerts;
   }) {
     this.#port = opts.port;
     this.#log = opts.log.child("printer");
@@ -282,6 +308,80 @@ export class PrinterGateway {
     this.#usernameOf = opts.usernameOf;
     this.#filesFor = opts.filesFor;
     this.#db = opts.db;
+    this.#alerts = opts.alerts;
+  }
+
+  /** Read the ink now and then for the accounts that asked to be told when it runs low. */
+  start(intervalMs = INK_WATCH_MS): void {
+    if (this.#watch || !this.#printerUri || !this.#db || !this.#alerts) return;
+    this.#watch = setInterval(() => void this.checkInk(), intervalMs);
+    this.#watch.unref();
+  }
+
+  stop(): void {
+    clearInterval(this.#watch);
+    this.#watch = undefined;
+  }
+
+  /** One round of the ink watch: read the printer (when anyone asked) and notify whoever is due. */
+  async checkInk(): Promise<void> {
+    if (!this.#db || !this.#alerts) return;
+    if (!(this.#db.prepare("SELECT COUNT(*) AS n FROM printer_ink_alerts").get() as { n: number }).n) return;
+    // Reading the printer runs the check; a printer that is off is simply read again next round.
+    await this.#printer().catch(() => undefined);
+    await this.#checking;
+  }
+
+  /** Compare levels just read with every account's alert. */
+  #inkSeen(a: IppResponse["attrs"]): void {
+    if (!this.#db || !this.#alerts) return;
+    const levels = a["marker-levels"] ?? [];
+    const inks = (a["marker-names"] ?? []).map((n, i) => ({ name: String(n).replace(/ ink$/i, ""), level: Number(levels[i]) })).filter((ink) => Number.isFinite(ink.level) && ink.level >= 0);
+    if (!inks.length) return;
+    const db = this.#db, alerts = this.#alerts;
+    this.#checking = this.#checking.then(async () => {
+      const rows = db.prepare("SELECT owner_id, threshold, notified FROM printer_ink_alerts").all() as Array<{ owner_id: string; threshold: number; notified: string }>;
+      for (const row of rows) {
+        const low = inks.filter((ink) => ink.level <= row.threshold);
+        const told = new Set(JSON.parse(row.notified) as string[]);
+        // A color back above the line (a new cartridge) is reported again the next time it runs low.
+        const still = low.filter((ink) => told.has(ink.name)).map((ink) => ink.name);
+        if (low.some((ink) => !told.has(ink.name))) {
+          const sent = await alerts.send(row.owner_id, low, row.threshold).catch(() => 0);
+          this.#log.info("ink alert", { owner: row.owner_id, threshold: row.threshold, low: low.map((ink) => `${ink.name} ${ink.level}%`), sent });
+          // Nobody was reached: it stays due, and goes out once a device has notifications on.
+          if (sent > 0) db.prepare("UPDATE printer_ink_alerts SET notified=?, notified_at=? WHERE owner_id=? AND threshold=?").run(JSON.stringify(low.map((ink) => ink.name)), Date.now(), row.owner_id, row.threshold);
+        } else if (still.length !== told.size) db.prepare("UPDATE printer_ink_alerts SET notified=? WHERE owner_id=? AND threshold=?").run(JSON.stringify(still), row.owner_id, row.threshold);
+      }
+    }).catch((err) => this.#log.warn("ink check failed", { error: err instanceof Error ? err.message : String(err) }));
+  }
+
+  #alertLine(account: { userId: string }): string {
+    const row = this.#db?.prepare("SELECT threshold, notified, notified_at FROM printer_ink_alerts WHERE owner_id=?").get(account.userId) as { threshold: number; notified: string; notified_at: number | null } | undefined;
+    if (!row) return "Ink alert: off";
+    const told = JSON.parse(row.notified) as string[];
+    return `Ink alert: the user is notified once a color is at or below ${row.threshold}%${told.length ? `; already notified about ${told.join(", ")} on ${new Date(row.notified_at ?? 0).toLocaleString("sv-SE")}` : ""}`;
+  }
+
+  async #inkAlert(account: { userId: string }, args: Record<string, unknown>): Promise<string> {
+    const db = this.#db, alerts = this.#alerts;
+    if (!db || !alerts) throw new PrintError("Ink alerts are not available on this installation");
+    if (args.threshold !== undefined) {
+      const threshold = Number(args.threshold);
+      if (!Number.isInteger(threshold) || threshold < 0 || threshold > 99) throw new PrintError("threshold must be an integer from 0 to 99");
+      if (threshold === 0) db.prepare("DELETE FROM printer_ink_alerts WHERE owner_id=?").run(account.userId);
+      else db.prepare("INSERT INTO printer_ink_alerts (owner_id, threshold, created_at) VALUES (?,?,?) ON CONFLICT(owner_id) DO UPDATE SET threshold=excluded.threshold, created_at=excluded.created_at, notified='[]', notified_at=NULL").run(account.userId, threshold, Date.now());
+    }
+    // Reading the printer also checks the new alert right away: ink already under the line is reported now.
+    const now = await this.#printer().then((res) => inkOf(res.attrs) || "not reported", (err) => `unknown (${err instanceof Error ? err.message : String(err)})`);
+    await this.#checking;
+    const on = !!db.prepare("SELECT 1 FROM printer_ink_alerts WHERE owner_id=?").get(account.userId);
+    return [
+      this.#alertLine(account),
+      `Ink now: ${now}`,
+      on ? "The server watches the ink itself (after every print and every few minutes) and sends a notification to the user's devices; no schedule is needed, and none should be created for this." : "",
+      on && !alerts.devices(account.userId) ? "None of the user's devices has notifications turned on, so the alert cannot reach them yet: tell them to turn notifications on in Settings; it is sent as soon as one is on." : "",
+    ].filter(Boolean).join("\n");
   }
 
   /** Give a granted runtime its printer URL. */
@@ -348,13 +448,14 @@ export class PrinterGateway {
       case "ping":
         return reply({});
       case "tools/list":
-        return reply({ tools: TOOLS });
+        return reply({ tools: this.#alerts ? TOOLS : TOOLS.filter((tool) => tool.name !== "ink_alert") });
       case "tools/call": {
         const name = String(params?.name);
         const args = (params?.arguments ?? {}) as Record<string, unknown>;
-        if (name === "printer_status") return reply(await this.#tool(() => this.#status()));
+        if (name === "printer_status") return reply(await this.#tool(() => this.#status(account)));
         if (name === "print_file") return reply(await this.#tool(() => this.#print(account, args)));
         if (name === "print_history") return reply(await this.#tool(() => this.#history(account, args)));
+        if (name === "ink_alert" && this.#alerts) return reply(await this.#tool(() => this.#inkAlert(account, args)));
         return { jsonrpc: "2.0", id, error: { code: -32602, message: `unknown tool ${name}` } };
       }
       default:
@@ -386,10 +487,11 @@ export class PrinterGateway {
       throw new PrintError(`Cannot reach the printer (${err instanceof Error ? err.message : String(err)}): it may be turned off or not on the network`);
     }
     if (res.status >= 0x0100) throw new PrintError(`The printer refused the query (IPP status 0x${res.status.toString(16)})`);
+    this.#inkSeen(res.attrs);
     return res;
   }
 
-  async #status(): Promise<string> {
+  async #status(account: { userId: string }): Promise<string> {
     const res = await this.#printer();
     const a = res.attrs;
     const reasons = problems(a);
@@ -400,6 +502,7 @@ export class PrinterGateway {
       `Status: ${STATES[Number(a["printer-state"]?.[0])] ?? "unknown"}${reasons.length ? ` (${reasons.join(", ")})` : ""}`,
       a["queued-job-count"] ? `Queued jobs: ${a["queued-job-count"][0]}` : "",
       ink ? `Ink: ${ink}` : "",
+      this.#alerts ? this.#alertLine(account) : "",
       paper ? `Paper: ${paper}` : "",
     ].filter(Boolean).join("\n");
   }

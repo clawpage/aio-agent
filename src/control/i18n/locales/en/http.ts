@@ -111,6 +111,9 @@ export const http: typeof zh = {
     browserBody: "Open Clawpage Agent to take over the browser.",
     envAway: "A task is waiting for you in Clawpage Agent",
     envAwayBody: (name: string) => `The AI is using ${name}. Come back to the app and it carries on by itself.`,
+    inkLow: "Printer ink is running low",
+    inkLevel: (name: string, level: number) => `${({"black":"Black","cyan":"Cyan","magenta":"Magenta","yellow":"Yellow"} as Record<string, string>)[name.toLowerCase()] ?? name} ${level}%`,
+    inkLowBody: (inks: string[], threshold: number) => `${inks.join(", ")}: at or below the ${threshold}% you asked to be told about.`,
   },
   tasks: {
     badFilter: "Invalid filter",

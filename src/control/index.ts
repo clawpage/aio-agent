@@ -557,8 +557,12 @@ async function main(): Promise<void> {
   ha.provision(ctx.cfg);
   const printer=new PrinterGateway({port:ctx.cfg.memberModelPort??4902,log:ctx.log,db:ctx.db,printerUri:ctx.cfg.printing.printerUri,accounts:ctx.cfg.printing.accounts,
     workspace:ctx.cfg.sandbox.containerWorkspaceDir,usernameOf:id=>account("SELECT username AS v FROM owners WHERE id=?",id),
-    filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id))});
+    filesFor:async id=>sandboxPrintFiles(id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)),
+    // Low ink goes to the account's devices in its own language, even with the console on screen.
+    alerts:{devices:id=>ctx.push?.count(id)??0,send:async(id,low,threshold)=>{const m=t((id===ctx.cfg.runtimeUserId?ctx:await ctx.runtimeForUser!(id)).tasks.locale()).http.push;
+      return await ctx.push?.notify(id,{title:m.inkLow,body:m.inkLowBody(low.map(ink=>m.inkLevel(ink.name,ink.level)),threshold),tag:"printer-ink"},{force:true})??0;}}});
   printer.provision(ctx.cfg);
+  printer.start();
   // Phones: each account's on the Mac it linked (the Mac app dials in).
   const deviceLinks=new DeviceLinks(ctx.db,ctx.cfg,ctx.log);
   ctx.deviceLinks=deviceLinks;
@@ -664,6 +668,7 @@ async function main(): Promise<void> {
     recovery.stop();
     idle?.stop();
     ownerNotifications.stop();
+    printer.stop();
     ownerVault.stop();
     server.close();
     modelGateway.close();

@@ -111,6 +111,9 @@ export const http: typeof zh = {
     browserBody: "開啟一站接管瀏覽器。",
     envAway: "任務在等你回到一站",
     envAwayBody: (name: string) => `AI 正在使用 ${name}，回到 App 後會自動繼續。`,
+    inkLow: "印表機墨水不多了",
+    inkLevel: (name: string, level: number) => `${({"black":"黑色","cyan":"青色","magenta":"洋紅","yellow":"黃色"} as Record<string, string>)[name.toLowerCase()] ?? name} ${level}%`,
+    inkLowBody: (inks: string[], threshold: number) => `${inks.join("、")}，已到你設定的 ${threshold}% 提醒線。`,
   },
   tasks: {
     badFilter: "篩選條件無效",
