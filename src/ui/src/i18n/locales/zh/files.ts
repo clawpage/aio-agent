@@ -45,7 +45,7 @@ export const files = {
     pageAlt: (name: string, page: number) => `${name} 第 ${page} 页`,
     pager: "翻页",
     prevPage: "上一页",
-    nextPage: "下一页",
+    nextPage: "下一页", prevImage: "上一张", nextImage: "下一张",
     pagesTruncated: (total: number, shown: number) => `（共 ${total} 页，仅预览前 ${shown} 页）`,
     truncated: "预览已截断",
     toPdf: "转换为 PDF",

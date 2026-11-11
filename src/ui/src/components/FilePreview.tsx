@@ -49,11 +49,41 @@ interface Props {
 
 type Phase = "loading" | "ready" | "error" | "unsupported";
 
+/** The pictures on the page behind the preview, in the order they appear there. */
+function picturesOnPage(): string[] {
+  const found: string[] = [];
+  for (const el of document.querySelectorAll('[data-kind="image"][data-path], img[data-sandbox-image]')) {
+    if (el.closest(".file-preview-overlay") || el.getClientRects().length === 0) continue;
+    const path = el.getAttribute("data-path") ?? el.getAttribute("data-sandbox-image");
+    if (path && !found.includes(path)) found.push(path);
+  }
+  return found;
+}
+
 export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBrowser, onConvert, actions }: Props) {
   const [path, setPath] = useState(initialPath);
   const [history, setHistory] = useState<string[]>([]);
   const [sourceView, setSourceView] = useState(false);
   useEffect(() => { setPath(initialPath); setHistory([]); }, [initialPath]);
+  /** A picture opened among others on the page turns to its neighbours (swipe, arrow keys, the side buttons). */
+  const [gallery] = useState(() => { const all = picturesOnPage(); return all.includes(initialPath) ? all : []; });
+  const [enter, setEnter] = useState<"next" | "prev" | undefined>(undefined);
+  const at = gallery.indexOf(path);
+  const steps = { prev: at > 0, next: at >= 0 && at < gallery.length - 1 };
+  const step = (direction: 1 | -1) => {
+    const next = at < 0 ? undefined : gallery[at + direction];
+    if (!next) return;
+    setEnter(direction === 1 ? "next" : "prev");
+    setPath(next);
+  };
+  const stepLatest = useRef(step);
+  stepLatest.current = step;
+  // The neighbours are fetched ahead, so turning to one shows it at once.
+  useEffect(() => {
+    if (at < 0) return;
+    const held = [gallery[at - 1], gallery[at + 1]].filter((p): p is string => !!p).map((p) => { const h = holdImage(p); h.promise.catch(() => {}); return h; });
+    return () => held.forEach((h) => h.release());
+  }, [gallery, at]);
   const openFile = (next: string) => { setHistory(old => [...old, path]); setPath(next); };
   const markdown = isMarkdownPath(path);
   const html = isHtmlPath(path);
@@ -102,6 +132,9 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
       if (event.key === "Escape") {
         event.stopPropagation();
         close();
+      } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        if ((event.target as HTMLElement | null)?.closest?.("input, textarea, [contenteditable]")) return;
+        stepLatest.current(event.key === "ArrowRight" ? 1 : -1);
       }
     };
     document.addEventListener("keydown", onKeyDown, true);
@@ -262,6 +295,7 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           <span className="file-preview-name" title={path}>
             {name}
           </span>
+          {gallery.length > 1 && at >= 0 && <span className="file-preview-count" data-testid="file-preview-count">{at + 1} / {gallery.length}</span>}
           <span className="muted tiny">{html ? t.files.preview.htmlPage : markdown ? t.files.preview.markdown : kindLabel(kind)}</span>
           <span className="spacer" />
           <button type="button" className="ghost file-preview-close" onClick={close} ref={closeRef} aria-label={t.files.preview.closeLabel}>
@@ -316,12 +350,16 @@ export function FilePreview({ path: initialPath, onClose, onOpenLink, onOpenInBr
           )}
 
           {phase === "ready" && kind === "image" && imageUrl && (
-            <ZoomableImage src={imageUrl} alt={name} testId="file-preview-image"
+            <ZoomableImage key={path} src={imageUrl} alt={name} testId="file-preview-image" enter={enter}
+              onStep={gallery.length > 1 ? step : undefined} steps={steps}
               onTap={() => setBars((shown) => !shown)} onPull={setPull} onDismiss={close} onError={() => {
               setError(t.files.preview.imageDecodeFailed);
               setPhase("error");
             }} />
           )}
+
+          {photo && steps.prev && <button type="button" className="file-preview-step prev" aria-label={t.files.preview.prevImage} onClick={() => step(-1)}>‹</button>}
+          {photo && steps.next && <button type="button" className="file-preview-step next" aria-label={t.files.preview.nextImage} onClick={() => step(1)}>›</button>}
 
           {phase === "ready" && kind === "video" && (
             <video key={`${path}#${attempt}`} className="file-preview-video" data-testid="file-preview-video"

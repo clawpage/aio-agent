@@ -47,7 +47,7 @@ export const files: typeof zh = {
     pageAlt: (name: string, page: number) => `${name} ${page} ページ目`,
     pager: 'ページ送り',
     prevPage: '前のページ',
-    nextPage: '次のページ',
+    nextPage: '次のページ', prevImage: '前の画像', nextImage: '次の画像',
     pagesTruncated: (total: number, shown: number) => `（全 ${total} ページ中、最初の ${shown} ページのみプレビュー）`,
     truncated: 'プレビューは一部のみです',
     toPdf: 'PDF に変換',

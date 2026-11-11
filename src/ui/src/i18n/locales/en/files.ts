@@ -47,7 +47,7 @@ export const files: typeof zh = {
     pageAlt: (name: string, page: number) => `${name}, page ${page}`,
     pager: "Pages",
     prevPage: "Previous",
-    nextPage: "Next",
+    nextPage: "Next", prevImage: "Previous picture", nextImage: "Next picture",
     pagesTruncated: (total: number, shown: number) => ` (${total} pages, previewing the first ${shown})`,
     truncated: "Preview truncated",
     toPdf: "Convert to PDF",

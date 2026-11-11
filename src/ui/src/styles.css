@@ -2547,6 +2547,38 @@ button .loading-mark { color: inherit; }
   font-weight: 500;
 }
 .file-preview-photo[data-bars="hidden"] :is(.file-preview-head, .file-preview-foot) { opacity: 0; pointer-events: none; }
+/* One picture among several: a count beside the name, and for a mouse a button at each side (a finger swipes instead). */
+.file-preview-photo .file-preview-count { flex: none; font-size: 13px; color: var(--media-text-dim); font-variant-numeric: tabular-nums; }
+.file-preview-step { display: none; }
+@media (hover: hover) and (pointer: fine) {
+  .file-preview-photo .file-preview-step {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 50%;
+    z-index: 1;
+    width: 44px;
+    height: 44px;
+    margin-top: -22px;
+    padding: 0 0 3px;
+    border-radius: 50%;
+    font-size: 26px;
+    line-height: 1;
+    color: var(--on-media);
+    background: var(--media-control);
+    border: 1px solid var(--media-control-border);
+    transition: opacity var(--dur-fast) ease;
+  }
+  .file-preview-photo .file-preview-step.prev { left: 16px; }
+  .file-preview-photo .file-preview-step.next { right: 16px; }
+  .file-preview-photo[data-bars="hidden"] .file-preview-step { opacity: 0; pointer-events: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .file-preview-photo .zoomable-image[data-enter="next"] { animation: photo-enter-next var(--dur-fast) var(--ease); }
+  .file-preview-photo .zoomable-image[data-enter="prev"] { animation: photo-enter-prev var(--dur-fast) var(--ease); }
+}
+@keyframes photo-enter-next { from { transform: translateX(40%); opacity: 0; } }
+@keyframes photo-enter-prev { from { transform: translateX(-40%); opacity: 0; } }
 .file-preview-overlay.file-preview-photo-overlay[data-popup-motion] > .file-preview { animation: none; }
 .file-preview-overlay.file-preview-photo-overlay[data-popup-motion="enter"] { animation: popup-fade-in var(--dur-fast) ease-out; }
 .file-preview-overlay.file-preview-photo-overlay[data-popup-motion="exit"] { animation: popup-fade-out calc(var(--popup-exit-ms) * 1ms) ease-in forwards; }

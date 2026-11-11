@@ -46,7 +46,7 @@ export const files: typeof zh = {
     pageAlt: (name: string, page: number) => `${name} 第 ${page} 頁`,
     pager: "翻頁",
     prevPage: "上一頁",
-    nextPage: "下一頁",
+    nextPage: "下一頁", prevImage: "上一張", nextImage: "下一張",
     pagesTruncated: (total: number, shown: number) => `（共 ${total} 頁，僅預覽前 ${shown} 頁）`,
     truncated: "預覽已截斷",
     toPdf: "轉換為 PDF",

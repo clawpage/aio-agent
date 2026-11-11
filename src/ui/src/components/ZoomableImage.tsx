@@ -8,6 +8,9 @@ const DISMISS_PX = 120;
 const DISMISS_SPEED = 0.6;
 /** How far down the backdrop is fully gone (progress 1). */
 const PULL_RANGE_PX = 360;
+/** Dragged this far sideways (or flicked), letting go turns to the next picture. */
+const STEP_PX = 80;
+const STEP_SPEED = 0.5;
 
 type View = { scale: number; x: number; y: number };
 const FIT: View = { scale: 1, x: 0, y: 0 };
@@ -19,11 +22,17 @@ const FIT: View = { scale: 1, x: 0, y: 0 };
  * The page itself never zooms (touch-action: none on the picture only). At its
  * fitted size a finger pulling down drags the picture (`onPull` gets 0–1 for the
  * backdrop) and letting go far or fast enough calls `onDismiss`; a single tap
- * that is not the start of a double tap calls `onTap`.
+ * that is not the start of a double tap calls `onTap`. With `onStep`, a finger
+ * dragging the fitted picture sideways takes it along and letting go far or fast
+ * enough asks for the next (1) or previous (-1) picture; where `steps` says there
+ * is none, the picture resists and springs back.
  */
-export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDismiss }: {
+export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDismiss, onStep, steps, enter }: {
   src: string; alt: string; testId?: string; onError?: (event: SyntheticEvent<HTMLImageElement>) => void;
   onTap?: () => void; onPull?: (progress: number) => void; onDismiss?: () => void;
+  onStep?: (direction: 1 | -1) => void; steps?: { prev: boolean; next: boolean };
+  /** The side this picture came in from, when it replaced another. */
+  enter?: "next" | "prev";
 }) {
   const img = useRef<HTMLImageElement>(null);
   const [view, setView] = useState<View>(FIT);
@@ -35,8 +44,8 @@ export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDism
   /** A lone finger that has not moved yet: lifting it is a tap. Lifting the fingers of a pinch is not. */
   const tap = useRef<{ id: number; x: number; y: number } | null>(null);
   const tapTimer = useRef<number | undefined>(undefined);
-  /** A finger on the fitted picture that may become a pull down: `locked` is decided once it has moved (mostly down or not). */
-  const pull = useRef<{ id: number; x: number; y: number; at: number; locked: boolean | null } | null>(null);
+  /** A finger on the fitted picture that may become a pull down or a turn sideways: `locked` is decided once it has moved. */
+  const pull = useRef<{ id: number; x: number; y: number; at: number; locked: "down" | "side" | false | null } | null>(null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const [settling, setSettling] = useState(false);
 
@@ -81,7 +90,7 @@ export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDism
     // Moves keep coming once the finger leaves the picture; capture can refuse a pointer it does not know.
     try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* still tracked by id */ }
     tap.current = pointers.current.size === 1 ? { id: event.pointerId, x: event.clientX, y: event.clientY } : null;
-    if (onDismiss && event.pointerType !== "mouse" && pointers.current.size === 1 && live.current.scale <= 1) {
+    if ((onDismiss || onStep) && event.pointerType !== "mouse" && pointers.current.size === 1 && live.current.scale <= 1) {
       pull.current = { id: event.pointerId, x: event.clientX, y: event.clientY, at: event.timeStamp, locked: null };
       setSettling(false);
     } else if (pull.current?.locked) endPull();
@@ -99,8 +108,13 @@ export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDism
     const start = pull.current;
     if (start?.id === event.pointerId) {
       const dx = event.clientX - start.x, dy = event.clientY - start.y;
-      if (start.locked === null && Math.hypot(dx, dy) > 10) start.locked = dy > Math.abs(dx);
+      if (start.locked === null && Math.hypot(dx, dy) > 10) start.locked = dy > Math.abs(dx) ? (onDismiss ? "down" : false) : onStep && Math.abs(dx) > Math.abs(dy) ? "side" : false;
       if (!start.locked) return;
+      if (start.locked === "side") {
+        // Towards a picture that is there it follows the finger; otherwise it resists.
+        setDrag({ x: (dx < 0 ? steps?.next : steps?.prev) ? dx : dx / 3, y: 0 });
+        return;
+      }
       setDrag({ x: dx, y: Math.max(0, dy) });
       onPull?.(Math.min(1, Math.max(0, dy) / PULL_RANGE_PX));
       return;
@@ -121,7 +135,17 @@ export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDism
     tap.current = null;
     const start = pull.current;
     if (start?.id === event.pointerId) {
-      const dy = event.clientY - start.y;
+      const dx = event.clientX - start.x, dy = event.clientY - start.y;
+      if (start.locked === "side") {
+        const far = Math.abs(dx) > STEP_PX || (Math.abs(dx) > 30 && Math.abs(dx) / Math.max(1, event.timeStamp - start.at) > STEP_SPEED);
+        if (event.type === "pointerup" && far && (dx < 0 ? steps?.next : steps?.prev)) {
+          pull.current = null;
+          onStep?.(dx < 0 ? 1 : -1); // The next picture comes in from that side.
+          return;
+        }
+        endPull();
+        return;
+      }
       if (start.locked && event.type === "pointerup" && (dy > DISMISS_PX || (dy > 40 && dy / Math.max(1, event.timeStamp - start.at) > DISMISS_SPEED))) {
         pull.current = null;
         onDismiss?.(); // The picture leaves from where it was let go.
@@ -148,7 +172,7 @@ export function ZoomableImage({ src, alt, testId, onError, onTap, onPull, onDism
   // Pulled down, the picture follows the finger and shrinks a little, about its centre.
   const transform = zoomed ? `translate(${view.x}px, ${view.y}px) scale(${view.scale})`
     : drag ? `translate(${drag.x}px, ${drag.y}px) scale(${Math.max(0.7, 1 - drag.y / 1200)})` : undefined;
-  return <img ref={img} src={src} alt={alt} data-testid={testId} data-zoom={view.scale.toFixed(2)} onError={onError} draggable={false}
+  return <img ref={img} src={src} alt={alt} data-testid={testId} data-enter={enter} data-zoom={view.scale.toFixed(2)} onError={onError} draggable={false}
     className={`zoomable-image${zoomed ? " zoomed" : ""}${drag ? " pulled" : ""}${settling ? " settling" : ""}`}
     style={{ transform }}
     onTransitionEnd={() => setSettling(false)}

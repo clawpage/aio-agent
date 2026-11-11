@@ -172,3 +172,93 @@ test("zoomed in, a finger moves the photo instead of pulling it away", async ({ 
   await expect(page.getByTestId("file-preview-image")).toBeVisible();
   expect(await zoom(page)).toBeCloseTo(2.5, 1);
 });
+
+test("one picture among several: a sideways swipe, the arrow keys or the side buttons turn to its neighbours", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await mockConsole(page, { conversations: [] });
+  const paths = ["一", "二", "三"].map((n) => `/home/gem/workspace/tasks/task-1/${n}.png`);
+  const task = { id: "task-1", revision: 1, title: "三张图", text: "画三张图", conversationId: "child-1", status: "completed", result: paths.map((p, i) => `![图${i + 1}](${p})`).join("\n\n"), error: null, attachments: [], relatedTaskId: null, dependencies: [], approvals: 0, createdAt: 1000, completedAt: Date.now() };
+  await page.route("**/api/main*", (r) => r.fulfill({ json: { mode: "tasks", tasks: [task], nextBefore: null, version: "v1" } }));
+  await page.route("**/api/documents/image**", (r) => r.fulfill({ contentType: "image/png", body: solidPng(600, 400) }));
+  await page.goto("/");
+  await page.locator(".bubble img.inline-media").nth(1).click();
+  const image = page.getByTestId("file-preview-image");
+  const name = page.locator(".file-preview-name");
+  const count = page.getByTestId("file-preview-count");
+  await expect(image).toBeVisible();
+  await expect(name).toHaveText("二.png");
+  await expect(count).toHaveText("2 / 3");
+  const box = (await image.boundingBox())!;
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  const swipe = async (id: number, dx: number) => {
+    await touch(page, "pointerdown", [[id, cx, cy]]);
+    await touch(page, "pointermove", [[id, cx + dx / 4, cy + 2]]);
+    await touch(page, "pointermove", [[id, cx + dx, cy + 4]]);
+    await touch(page, "pointerup", [[id, cx + dx, cy + 4]]);
+  };
+
+  // The picture follows the finger; let go after a short way and it springs back.
+  await touch(page, "pointerdown", [[1, cx, cy]]);
+  await touch(page, "pointermove", [[1, cx - 20, cy]]);
+  await touch(page, "pointermove", [[1, cx - 60, cy]]);
+  expect((await image.boundingBox())!.x).toBeCloseTo(box.x - 60, 0);
+  await page.waitForTimeout(400); // held, not flicked
+  await touch(page, "pointerup", [[1, cx - 60, cy]]);
+  await expect(name).toHaveText("二.png");
+  await expect.poll(async () => Math.round((await image.boundingBox())!.x)).toBe(Math.round(box.x));
+
+  // Far enough to the left: the next one; to the right: back.
+  await swipe(2, -150);
+  await expect(name).toHaveText("三.png");
+  await expect(count).toHaveText("3 / 3");
+  await expect(image).toHaveAttribute("data-zoom", "1.00");
+  await page.screenshot({ path: info.outputPath("third.png") });
+  // At the last one there is nothing further: it resists and stays.
+  await swipe(3, -150);
+  await expect(name).toHaveText("三.png");
+  await expect.poll(async () => Math.round((await image.boundingBox())!.x)).toBe(Math.round(box.x));
+  await swipe(4, 150);
+  await expect(name).toHaveText("二.png");
+  // The download follows the picture shown.
+  expect(decodeURIComponent((await page.getByTestId("file-preview-download").getAttribute("href"))!)).toContain("二.png");
+
+  // Zoomed in, a finger moves the picture and never turns the page.
+  for (const _ of [0, 1]) { await touch(page, "pointerdown", [[5, cx, cy]]); await touch(page, "pointerup", [[5, cx, cy]]); }
+  expect(await zoom(page)).toBeCloseTo(2.5, 1);
+  await swipe(6, -150);
+  await expect(name).toHaveText("二.png");
+  for (const _ of [0, 1]) { await touch(page, "pointerdown", [[7, cx, cy]]); await touch(page, "pointerup", [[7, cx, cy]]); }
+  expect(await zoom(page)).toBe(1);
+
+  // Arrow keys everywhere; with a mouse, a button at each side that is only there when a neighbour is.
+  await page.keyboard.press("ArrowLeft");
+  await expect(name).toHaveText("一.png");
+  await page.keyboard.press("ArrowLeft");
+  await expect(name).toHaveText("一.png");
+  if (info.project.name === "desktop") {
+    await expect(page.locator(".file-preview-step.prev")).toHaveCount(0);
+    await page.locator(".file-preview-step.next").click();
+    await expect(name).toHaveText("二.png");
+    await expect(page.locator(".file-preview-step.prev")).toBeVisible();
+  } else {
+    await expect(page.locator(".file-preview-step.next")).toBeHidden();
+    await page.keyboard.press("ArrowRight");
+    await expect(name).toHaveText("二.png");
+  }
+  // Closing leaves the page as it was.
+  await page.keyboard.press("Escape");
+  await expect(image).toHaveCount(0);
+  await expect(page.locator(".bubble img.inline-media")).toHaveCount(3);
+});
+
+test("a picture on its own has no count and does not move sideways", async ({ page }) => {
+  const image = await open(page);
+  await expect(page.getByTestId("file-preview-count")).toHaveCount(0);
+  const box = (await image.boundingBox())!;
+  const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+  await touch(page, "pointerdown", [[1, cx, cy]]);
+  await touch(page, "pointermove", [[1, cx - 100, cy]]);
+  expect(Math.round((await image.boundingBox())!.x)).toBe(Math.round(box.x));
+  await touch(page, "pointerup", [[1, cx - 100, cy]]);
+  await expect(image).toBeVisible();
+});
