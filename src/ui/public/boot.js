@@ -22,6 +22,41 @@
   });
   setTimeout(check, WAIT_MS);
 
+  // The service worker opens the console from a saved page and replaces it with the deployed one behind
+  // it. In Safari an older worker never did (its page request stayed pending, which also kept a newer
+  // worker from taking over), so a phone stayed on an old build for good. The guard does the same job
+  // for whichever worker runs: no-op when the saved page is already the deployed one.
+  async function refresh() {
+    const response = await fetch("/", { cache: "no-store" });
+    if (!response.ok || response.redirected || !(response.headers.get("content-type") || "").startsWith("text/html")) return;
+    const html = await response.text();
+    for (const name of await caches.keys()) {
+      if (!name.startsWith("aio-console-")) continue;
+      const cache = await caches.open(name);
+      const saved = await cache.match("/");
+      if (saved && (await saved.text()) !== html) await cache.put("/", new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } }));
+    }
+  }
+  // A page from a build that is gone got the "out of date" sheet in place of its styles (edge.mjs marks it
+  // with --aio-stale), and reloading would open the same saved page: the saved page is replaced first, and
+  // if that did not help, the saved copies and the worker go.
+  const STALE = "aio-stale-retry";
+  addEventListener("load", () => {
+    let n = 2;
+    try {
+      if (!getComputedStyle(document.documentElement).getPropertyValue("--aio-stale").trim()) {
+        sessionStorage.removeItem(STALE);
+        setTimeout(() => void refresh().catch(() => undefined), 3000);
+        return;
+      }
+      n = Number(sessionStorage.getItem(STALE) || 0);
+      if (n < 2) sessionStorage.setItem(STALE, String(n + 1));
+    } catch { return; }
+    if (n >= 2) return;
+    settled = true;
+    void (n === 0 ? refresh() : forget()).catch(() => undefined).then(() => location.reload());
+  });
+
   const tries = () => { try { return Number(sessionStorage.getItem(KEY) || 0); } catch { return 2; } };
   function check() {
     if (settled) return;

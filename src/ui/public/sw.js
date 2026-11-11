@@ -9,8 +9,11 @@
  * A deployed page that arrives but cannot be kept drops the saved one, so a device whose saves fail
  * opens from the network instead of staying on an old console for good.
  */
-/** v2: a fresh start for devices left on an old saved page by saves that failed (2026-11-06). */
-const CACHE = "aio-console-v2";
+/**
+ * v2: a fresh start for devices left on an old saved page by saves that failed (2026-11-06).
+ * v3: again, for iPhones whose saved page was never replaced after a deploy (2026-11-11, see openPage).
+ */
+const CACHE = "aio-console-v3";
 /** The one console page: every console route (/, /login, /u/<name>/…) is the same index.html. */
 const PAGE = "/";
 
@@ -20,8 +23,8 @@ self.addEventListener("install", (event) => {
   event.waitUntil(fetch(PAGE, { cache: "no-store" }).then((response) => (response.ok ? remember(response) : undefined)).catch(() => undefined));
 });
 self.addEventListener("activate", (event) => event.waitUntil((async () => {
-  // The page request starts while the worker wakes up, so the network is not waited on twice.
-  await self.registration.navigationPreload?.enable().catch(() => undefined);
+  // No navigation preload: in Safari its answer could stay pending for good, and the saved page with it.
+  await self.registration.navigationPreload?.disable().catch(() => undefined);
   for (const name of await caches.keys()) if (name.startsWith("aio-console-") && name !== CACHE) await caches.delete(name);
   await self.clients.claim();
 })()));
@@ -42,7 +45,8 @@ const GUARD = "/boot.js";
 async function guardFile(event) {
   const cache = await caches.open(CACHE);
   const saved = await cache.match(GUARD);
-  const fresh = fetch(event.request).then(async (response) => {
+  // Past the browser's own cache: a proxy in front may let it keep this file for hours.
+  const fresh = fetch(GUARD, { cache: "no-store" }).then(async (response) => {
     if (response.ok && response.status === 200) await cache.put(GUARD, response.clone());
     return response;
   });
@@ -53,9 +57,9 @@ async function guardFile(event) {
 async function openPage(event) {
   const saved = await caches.match(PAGE, { cacheName: CACHE });
   if (saved) {
-    // The network answer (preloaded while the worker woke up) is kept for the next opening.
+    // The deployed page is fetched behind the saved one and kept for the next opening.
     event.waitUntil((async () => {
-      const response = (await event.preloadResponse) || await fetch(event.request);
+      const response = await fetch(PAGE, { cache: "no-store" });
       if (!response.ok || response.redirected || !(response.headers.get("content-type") || "").startsWith("text/html")) return;
       // Offline the fetch above fails and the saved page stays; here the server answered and keeping it failed.
       try { await remember(response); } catch { await (await caches.open(CACHE)).delete(PAGE).catch(() => undefined); }
@@ -65,8 +69,7 @@ async function openPage(event) {
     headers.set("Server-Timing", "sw;desc=cache");
     return new Response(saved.body, { status: saved.status, statusText: saved.statusText, headers });
   }
-  let response;
-  response = (await event.preloadResponse) || await fetch(event.request);
+  const response = await fetch(event.request);
   if (response.ok && !response.redirected && (response.headers.get("content-type") || "").startsWith("text/html")) event.waitUntil(remember(response.clone()));
   return response;
 }
@@ -92,7 +95,7 @@ async function remember(response) {
   await Promise.all([...named].map(async (path) => {
     if (await cache.match(path)) return;
     const file = await fetch(path).catch(() => undefined);
-    if (file && file.status === 200) await cache.put(path, file);
+    if (file && keepable(file)) await cache.put(path, file);
   }));
 }
 
@@ -101,9 +104,12 @@ async function buildFile(event) {
   const saved = await cache.match(event.request);
   if (saved) return saved;
   const response = await fetch(event.request);
-  if (response.ok && response.status === 200) event.waitUntil(cache.put(event.request, response.clone()));
+  if (keepable(response)) event.waitUntil(cache.put(event.request, response.clone()));
   return response;
 }
+
+/** A build file as built. The sheet a gone build's page gets in place of its styles (edge.mjs, no-store) is never kept. */
+const keepable = (response) => response.status === 200 && !/no-store/i.test(response.headers.get("cache-control") || "");
 
 self.addEventListener("push", (event) => {
   let data = {};

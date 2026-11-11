@@ -37,9 +37,11 @@ const HOP = new Set(["connection", "keep-alive", "proxy-connection", "transfer-e
 
 /**
  * The stylesheet a page from a build that is gone gets: nothing of the page, one line asking to reload it.
- * The colors are copies of --bg and --muted (src/ui/src/theme.css), as in index.html.
+ * The colors are copies of --bg and --muted (src/ui/src/theme.css), as in index.html. --aio-stale tells the
+ * start guard (public/boot.js) to drop the service worker's saved page and load the deployed one.
  */
-const STALE_PAGE_CSS = `html, body { margin: 0; background: #131219; overflow: hidden; }
+const STALE_PAGE_CSS = `html { --aio-stale: 1; }
+html, body { margin: 0; background: #131219; overflow: hidden; }
 body > * { display: none !important; }
 body::before { content: "This page is out of date. Reload it to continue."; position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; text-align: center; font: 16px/1.6 -apple-system, system-ui, sans-serif; color: #9d98ae; }
 :lang(zh) body::before { content: "页面已过期，请刷新后继续使用。"; }

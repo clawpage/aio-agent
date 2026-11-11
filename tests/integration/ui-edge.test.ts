@@ -81,6 +81,8 @@ describe("UI edge", () => {
     expect(sheet.headers.get("cache-control")).toBe("no-store");
     const css = await sheet.text();
     expect(css).toContain("body > * { display: none !important; }");
+    // The start guard (public/boot.js) reads this to replace the saved page by itself.
+    expect(css).toContain("--aio-stale: 1");
     expect(css).toContain("Reload it to continue");
     expect((await fetch(`${base}/sw.js`)).headers.get("cache-control")).toBe("no-cache");
     // Dot segments are resolved inside the build; an encoded slash cannot climb out of it.

@@ -24,7 +24,7 @@ async function setup(page: Page) {
 /** Puts an older deploy of the console (the same page, marked) where the worker opens it from. */
 const saveOlderPage = (page: Page) => page.evaluate(async () => {
   const html = (await (await fetch("/", { cache: "no-store" })).text()).replace("<html", '<html data-deploy="old"');
-  await (await caches.open("aio-console-v2")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
+  await (await caches.open("aio-console-v3")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
 });
 const savedIsOlder = (page: Page) => page.evaluate(async () => (await (await caches.match("/"))!.text()).includes('data-deploy="old"'));
 
@@ -73,4 +73,33 @@ test("a saved console the service has moved past is dropped for the deployed one
   // Dropped and loaded from the server; this test's deployed page is just as old, so it then says so instead of reloading on.
   await expect(page.locator(".version-banner")).toContainText("需要更新界面");
   await expect(page.locator("html")).not.toHaveAttribute("data-deploy", "old");
+});
+
+test("a saved page whose build is gone is replaced and reloaded by itself", async ({ page }) => {
+  await setup(page);
+  // An older deploy saved, whose stylesheet the server no longer has: it answers with the sheet that
+  // hides the page and asks to reload (src/ui/edge.mjs), which reloading alone would show again.
+  await page.evaluate(async () => {
+    const html = (await (await fetch("/", { cache: "no-store" })).text()).replace("<html", '<html data-deploy="old"').replace(/\/assets\/index-[^"]+\.css/, "/assets/index-GONE.css");
+    const cache = await caches.open("aio-console-v3");
+    await cache.put("/", new Response(html, { headers: { "content-type": "text/html" } }));
+    await cache.put("/assets/index-GONE.css", new Response("html { --aio-stale: 1; } body > * { display: none !important; }", { headers: { "content-type": "text/css" } }));
+  });
+  await page.reload();
+  await expect(page.locator("html")).not.toHaveAttribute("data-deploy", "old");
+  await expect(inbox(page)).toBeVisible();
+});
+
+test("the start guard keeps the saved page current where the worker does not", async ({ page }) => {
+  await setup(page);
+  // The cache of an older worker that is still the active one (Safari kept it so, its page request pending for good).
+  const saved = () => page.evaluate(async () => (await (await (await caches.open("aio-console-v1")).match("/"))!.text()).includes('data-deploy="old"'));
+  await page.evaluate(async () => {
+    const html = (await (await fetch("/", { cache: "no-store" })).text()).replace("<html", '<html data-deploy="old"');
+    await (await caches.open("aio-console-v1")).put("/", new Response(html, { headers: { "content-type": "text/html" } }));
+  });
+  expect(await saved()).toBe(true);
+  await page.reload();
+  await expect(inbox(page)).toBeVisible();
+  await expect.poll(saved, { timeout: 15_000 }).toBe(false);
 });
