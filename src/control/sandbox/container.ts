@@ -640,6 +640,9 @@ finally:
         "env", `CLAUDE_CONFIG_DIR=${this.#cfg.claudeCode.configDir}`, "DISABLE_AUTOUPDATER=1", `TZ=${this.#cfg.browser.timezone}`,
         // A browser hand-over waits up to 30 minutes for the person inside one tool call.
         `MCP_TOOL_TIMEOUT=${TAB_TOOL_TIMEOUT_SEC * 1000}`,
+        // Every MCP tool loaded up front, as Codex has them: with tool search the CLI listed them by name only, and
+        // the agent rarely looked them up (it guessed the home town instead of reading aio_kb).
+        "ENABLE_TOOL_SEARCH=false",
         this.#cfg.claudeCode.bin, ...args,
       ],
       workdir: this.#cfg.sandbox.containerWorkspaceDir,

@@ -1280,6 +1280,8 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
 - **整体切换**：选中后派单与执行都由 Claude Code 完成。派单使用无工具、不落盘的一次性运行（`--tools ""`，模型 `PA_CLAUDE_CODE_AUX_MODEL`）。
   成员账号默认不提供；被分配 `claude-sonnet-5-5` 的成员经成员网关使用。
 - **执行方式**：每个轮次在沙箱内启动 `claude -p`（stream-json 双向流），以 `bypassPermissions` 执行；MCP 只挂沙箱内服务（`--strict-mcp-config`）；
+  与 Codex 一样，账号可用的 MCP 服务（浏览器标签页、知识库、Home Assistant、打印机、定时任务、生图、语音、执行环境等）的工具每轮全部直接加载（`ENABLE_TOOL_SEARCH=false`）；
+  CLI 默认把它们收进 ToolSearch 只给名字，执行器很少去查，看起来像没注册；
   SOUL.md 经 `--append-system-prompt` 注入，工作区 `AGENTS.md` 经配置目录的 `CLAUDE.md` 导入。事件翻译为与 Codex 相同的时间线条目，
   结果、停止与重连沿用同一套机制。
 - **会话连续**：控制面预先指定会话 UUID，首轮 `--session-id`、之后 `--resume`。运行中补充写入同一进程，收到回显才算送达；停止通过控制通道
