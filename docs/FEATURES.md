@@ -1282,6 +1282,7 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
 - **执行方式**：每个轮次在沙箱内启动 `claude -p`（stream-json 双向流），以 `bypassPermissions` 执行；MCP 只挂沙箱内服务（`--strict-mcp-config`）；
   与 Codex 一样，账号可用的 MCP 服务（浏览器标签页、知识库、Home Assistant、打印机、定时任务、生图、语音、执行环境等）的工具每轮全部直接加载（`ENABLE_TOOL_SEARCH=false`）；
   CLI 默认把它们收进 ToolSearch 只给名字，执行器很少去查，看起来像没注册；
+  思考以摘要形式取回（`--thinking-display summarized`；CLI 默认不取，思考块是空的，一轮工具调用之间就没有任何文字），在时间线里显示为思考摘要；
   SOUL.md 经 `--append-system-prompt` 注入，工作区 `AGENTS.md` 经配置目录的 `CLAUDE.md` 导入。事件翻译为与 Codex 相同的时间线条目，
   结果、停止与重连沿用同一套机制。
 - **会话连续**：控制面预先指定会话 UUID，首轮 `--session-id`、之后 `--resume`。运行中补充写入同一进程，收到回显才算送达；停止通过控制通道

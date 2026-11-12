@@ -162,6 +162,9 @@ export class ClaudeCodeSession {
       "--verbose",
       "--include-partial-messages",
       "--replay-user-messages",
+      // The CLI asks for no thinking text by default (blocks arrive empty); summaries are what the timeline
+      // shows between tool calls, as Codex's reasoning summaries are.
+      "--thinking-display", "summarized",
       // Full access inside the container, like Codex's approval_policy=never.
       "--permission-mode", "bypassPermissions",
       "--strict-mcp-config", "--mcp-config", mcpConfig(this.#browserTasks.get(threadId), this.#cfg),

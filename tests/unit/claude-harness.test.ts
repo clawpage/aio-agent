@@ -270,6 +270,8 @@ describe("ClaudeCodeSession", () => {
     expect(args).toEqual(expect.arrayContaining(["--model", "claude-opus-5-5", "--effort", "xhigh", "--append-system-prompt", "你是助理", "--permission-mode", "bypassPermissions", "--strict-mcp-config"]));
     // The CLI's session-bound timers are off: the account's schedules are aio_schedule's.
     expect(args).toContain("--disallowedTools=CronCreate,CronDelete,CronList,ScheduleWakeup");
+    // Without it thinking blocks arrive empty and a turn of tool calls shows no words until the answer.
+    expect(args.slice(args.indexOf("--thinking-display"), args.indexOf("--thinking-display") + 2)).toEqual(["--thinking-display", "summarized"]);
     // The credential travels in the child environment only.
     expect(env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: SECRET });
     expect(args.join(" ")).not.toContain(SECRET);
