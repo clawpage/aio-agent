@@ -1591,6 +1591,11 @@ export function createApiRouter(context: AppContext): Router {
     const out = await context.tabs.front(String((req.body as { target?: unknown } | undefined)?.target ?? ""));
     res.status(out.status).json(out.body);
   }));
+  router.post("/browser/overview/close", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
+    if (!context.tabs?.closePage) { res.status(404).json({ error: "not_found" }); return; }
+    const out = await context.tabs.closePage(String((req.body as { target?: unknown } | undefined)?.target ?? ""));
+    res.status(out.status).json(out.body);
+  }));
   router.post("/browser/person/close", requireKind("primary"), requireSession, asyncHandler(async (req, res) => {
     if (!context.tabs) { res.status(404).json({ error: "not_found" }); return; }
     const out = await context.tabs.close(personTab(req));

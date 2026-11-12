@@ -46,7 +46,7 @@ export const browser: typeof zh = {
     unowned: "Unassigned",
     dialog: "Browser tabs",
     title: "Tabs",
-    hint: "Tap one to switch to it",
+    hint: "Choose one to switch to it; close the ones you no longer need",
     close: "Close tab overview",
     failed: "The browser can't list its tabs right now; retrying shortly",
     loading: "Loading tabs…",
@@ -54,6 +54,8 @@ export const browser: typeof zh = {
     switchTo: (title: string) => `Switch to: ${title}`,
     front: "Showing",
     switching: "Switching…",
+    closePage: (title: string) => `Close page: ${title}`,
+    closing: "Closing…",
     blank: "Blank page",
   },
   desktop: {

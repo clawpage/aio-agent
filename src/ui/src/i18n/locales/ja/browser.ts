@@ -46,7 +46,7 @@ export const browser: typeof zh = {
     unowned: "所属なし",
     dialog: "ブラウザのタブ",
     title: "タブ",
-    hint: "タップして切り替え",
+    hint: "選ぶと切り替わります。不要なページは閉じられます",
     close: "タブの一覧を閉じる",
     failed: "ブラウザのタブ一覧を取得できません。しばらくすると自動で再試行します",
     loading: "タブを読み込み中…",
@@ -54,6 +54,8 @@ export const browser: typeof zh = {
     switchTo: (title: string) => `切り替え：${title}`,
     front: "表示中",
     switching: "切り替え中…",
+    closePage: (title: string) => `ページを閉じる：${title}`,
+    closing: "閉じています…",
     blank: "空白のページ",
   },
   desktop: {

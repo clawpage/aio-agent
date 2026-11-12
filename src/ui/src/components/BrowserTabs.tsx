@@ -22,6 +22,7 @@ function ownerLabel(page: OverviewPage): string {
  * Every page open in the workspace browser at a glance: a preview, title and
  * site of each, and whose it is. Choosing one brings its window to the front of
  * the desktop the person is watching; nobody's control over a page changes.
+ * A page can be closed from here too, unless a running task's agent works in it.
  */
 export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNotify: (message: string, tone?: "error") => void }) {
   const [pages, setPages] = useState<OverviewPage[] | null>(null);
@@ -29,6 +30,7 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
   // When each page's preview was taken, and of what (its url and title).
   const [shots, setShots] = useState<Record<string, { key: string; at: number }>>({});
   const [switching, setSwitching] = useState<string | null>(null);
+  const [closing, setClosing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -66,6 +68,20 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
     }
   };
 
+  const close = async (page: OverviewPage) => {
+    if (closing) return;
+    setClosing(page.target);
+    try {
+      await api.browserClosePage(page.target);
+      setPages(old => old && old.filter(p => p.target !== page.target));
+    } catch (err) {
+      onNotify(err instanceof Error ? err.message : String(err), "error");
+    } finally {
+      setClosing(null);
+      void load();
+    }
+  };
+
   return <PopupSurface className="browser-tabs" role="dialog" aria-label={t.browser.tabs.dialog} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="browser-tabs-panel">
       <header className="browser-tabs-head">
@@ -80,10 +96,11 @@ export function BrowserTabs({ onClose, onNotify }: { onClose: () => void; onNoti
           : <ul className="browser-tabs-grid">
             {pages.map(page => <li key={page.target}>
               <button type="button" className={`browser-tab-card${page.front ? " front" : ""}`} disabled={!!switching} onClick={() => void choose(page)} aria-label={t.browser.tabs.switchTo(page.title || hostOf(page.url))}>
-                <span className="browser-tab-shot"><img src={api.browserOverviewShotUrl(page.target, shots[page.target]?.at ?? 0)} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} onLoad={event => { event.currentTarget.style.visibility = ""; }}/>{page.front && <span className="browser-tab-badge">{t.browser.tabs.front}</span>}{switching === page.target && <span className="browser-tab-badge">{t.browser.tabs.switching}</span>}</span>
+                <span className="browser-tab-shot"><img src={api.browserOverviewShotUrl(page.target, shots[page.target]?.at ?? 0)} alt="" loading="lazy" onError={event => { event.currentTarget.style.visibility = "hidden"; }} onLoad={event => { event.currentTarget.style.visibility = ""; }}/>{page.front && <span className="browser-tab-badge">{t.browser.tabs.front}</span>}{switching === page.target && <span className="browser-tab-badge">{t.browser.tabs.switching}</span>}{closing === page.target && <span className="browser-tab-badge">{t.browser.tabs.closing}</span>}</span>
                 <span className="browser-tab-title">{page.title || hostOf(page.url) || t.browser.tabs.blank}</span>
                 <span className="browser-tab-meta"><span className="browser-tab-host">{hostOf(page.url)}</span><span className={`browser-tab-owner ${page.owner ?? "none"}${page.holder === "human" ? " human" : ""}`}>{ownerLabel(page)}</span></span>
               </button>
+              {page.closable && <button type="button" className="browser-tab-close" disabled={!!closing || !!switching} onClick={() => void close(page)} aria-label={t.browser.tabs.closePage(page.title || hostOf(page.url) || t.browser.tabs.blank)}>✕</button>}
             </li>)}
           </ul>}
     </div>

@@ -44,7 +44,7 @@ export const browser = {
     unowned: "未归属",
     dialog: "浏览器标签页",
     title: "标签页",
-    hint: "点一个切换到它",
+    hint: "点一个切换到它；不再需要的可以关掉",
     close: "关闭标签页总览",
     failed: "浏览器暂时打不开标签页列表，稍后会自动重试",
     loading: "正在读取标签页…",
@@ -52,6 +52,8 @@ export const browser = {
     switchTo: (title: string) => `切换到：${title}`,
     front: "正在显示",
     switching: "切换中…",
+    closePage: (title: string) => `关闭页面：${title}`,
+    closing: "关闭中…",
     blank: "空白页",
   },
   desktop: {

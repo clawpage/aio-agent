@@ -45,7 +45,7 @@ export const browser: typeof zh = {
     unowned: "未歸屬",
     dialog: "瀏覽器分頁",
     title: "分頁",
-    hint: "點一個切換到它",
+    hint: "點一個切換過去；不再需要的可以關掉",
     close: "關閉分頁總覽",
     failed: "瀏覽器暫時打不開分頁列表，稍後會自動重試",
     loading: "正在讀取分頁…",
@@ -53,6 +53,8 @@ export const browser: typeof zh = {
     switchTo: (title: string) => `切換到：${title}`,
     front: "正在顯示",
     switching: "切換中…",
+    closePage: (title: string) => `關閉頁面：${title}`,
+    closing: "關閉中…",
     blank: "空白頁",
   },
   desktop: {

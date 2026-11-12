@@ -316,6 +316,8 @@ export interface OverviewPage {
   holder: "ai" | "human" | null;
   /** The page kept on top of the desktop right now. */
   front: boolean;
+  /** Whether the person may close it here: any page but one a running task's agent works in. */
+  closable?: boolean;
 }
 
 export interface TaskTab {

@@ -94,7 +94,7 @@ const cursors = new Map();
 let seq = 0;
 
 function snapshotRecords() {
-  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport: loginReport || null }));
+  return [...registry.values()].map(({ id, page, key, title, targetId, createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport, left }) => ({ id, key, title, targetId, url: safeUrl(page), createdAt, lastUsed, finishedAt, holder, humanSince, request, loginReport: loginReport || null, left: Boolean(left) }));
 }
 
 function safeUrl(page) {
@@ -143,6 +143,7 @@ function register(page, key, title, extra = {}) {
   const tab = {
     id, page, key, title, targetId: extra.targetId || null, createdAt: extra.createdAt || now, lastUsed: extra.lastUsed || now, finishedAt: extra.finishedAt ?? null,
     holder: extra.holder === 'human' || key === PERSON ? 'human' : 'ai', humanSince: extra.humanSince ?? (key === PERSON ? now : null), request: extra.request ?? null,
+    left: Boolean(extra.left),
   };
   registry.set(id, tab);
   if (!extra.id && !extra.keepCursor) cursors.set(key, id);
@@ -203,6 +204,11 @@ function frontTab() {
   return [...registry.values()].filter((t) => t.holder === 'human' && !t.page.isClosed()).sort((a, b) => b.humanSince - a.humanSince)[0] || null;
 }
 
+/** Whether an open console shows this tab right now. */
+function watched(tab) {
+  return Boolean(pinned) && pinned.until > Date.now() && pinned.tabId === tab.id;
+}
+
 /** Bring the front tab back on top now, and again after a late-mapping window could have covered it. */
 function keepFront() {
   const raise = () => { const tab = frontTab(); if (tab) void tab.page.bringToFront().catch(() => undefined); };
@@ -241,6 +247,7 @@ function waitForHuman(tab, signal) {
 async function takeControl(tab) {
   tab.holder = 'human';
   tab.humanSince = Date.now();
+  tab.left = false;
   save();
   pin(tab);
   await tab.page.bringToFront().catch(() => undefined);
@@ -254,6 +261,27 @@ function releaseControl(tab) {
   tab.lastUsed = Date.now();
   save();
   settleWaiters(tab.id, 'released');
+}
+
+/**
+ * Someone else opens a page: a finished task's tab a person took over and no console
+ * shows any more goes back to the agent. A tab nobody returns to must not stay on top
+ * of the desktop or keep the browser full for good. `left` marks it, so what the
+ * person typed there is still looked for before the tab gives way.
+ */
+function handBackLeftTabs(exceptKey) {
+  for (const tab of [...registry.values()]) {
+    if (tab.key === PERSON || tab.key === exceptKey || !tab.finishedAt || tab.holder !== 'human' || tab.locked || tab.page.isClosed() || watched(tab)) continue;
+    tab.left = true;
+    releaseControl(tab);
+  }
+}
+
+/** The pages a person keeps open, as a task that found no room reads them. */
+function keptByPerson() {
+  const short = (text) => (text.length > 160 ? `${text.slice(0, 160)}…` : text);
+  return [...registry.values()].filter((t) => !t.page.isClosed() && (t.holder === 'human' || t.left))
+    .map((t) => `${short(safeUrl(t.page)) || 'a blank page'} (${t.key === PERSON ? 'opened by the user' : `taken over by the user in the task "${short(String(t.title || ''))}"`})`);
 }
 
 // ------------------------------------------------------------------ browser
@@ -376,11 +404,14 @@ async function newTab(key, title) {
   const browser = context.browser();
   let session;
   try {
+    handBackLeftTabs(key);
     await makeRoom(key);
     const m = memory();
     if (m && m.used + MEM_NEED > m.max) {
+      const kept = key === PERSON ? [] : keptByPerson();
+      const theirs = kept.length ? ` The user keeps ${kept.length === 1 ? 'this page' : 'these pages'} open, and a task never closes them: ${kept.join('; ')}. If you cannot go on without a new tab, tell the user which pages these are and that closing the ones no longer needed frees the room: the tabs button of the workspace browser lists every open page with a close button.` : '';
       // `code` lets the control plane word it for a person who reopened a page.
-      throw Object.assign(new Error('Sandbox memory is tight, so no new tab is opened for now. Reuse an existing tab, or first close the pages of this task you have finished reading, then continue; this is not a browser permission problem.'), { code: 'memory_tight' });
+      throw Object.assign(new Error(`Sandbox memory is tight, so no new tab is opened for now. Reuse an existing tab, or first close the pages of this task you have finished reading, then continue; this is not a browser permission problem.${theirs}`), { code: 'memory_tight' });
     }
     session = await browser.newBrowserCDPSession();
     // While a person looks at another tab the window opens without taking focus (keepFront still guards its stacking).
@@ -427,7 +458,7 @@ function ownTabs(key) {
 /** Destroy on demand: keep at most MAX_FINISHED_TABS finished tabs, oldest-used first to go; never one a person holds or looks at. */
 async function enforceFinishedCap(exceptKey) {
   const front = frontTab();
-  const finished = finishedTabs().filter((t) => t.key !== exceptKey && t !== front).sort((a, b) => a.lastUsed - b.lastUsed);
+  const finished = finishedTabs().filter((t) => t.key !== exceptKey && t !== front && !t.left).sort((a, b) => a.lastUsed - b.lastUsed);
   while (finished.length > MAX_FINISHED_TABS) {
     const tab = finished.shift();
     await tab.page.close().catch(() => undefined);
@@ -438,6 +469,7 @@ async function enforceFinishedCap(exceptKey) {
 function touchTask(key, title) {
   for (const tab of ownTabs(key)) {
     tab.finishedAt = null;
+    tab.left = false;
     if (title) tab.title = title;
   }
 }
@@ -951,9 +983,23 @@ async function overview() {
       target: t.id, title: t.title || '', url: t.url || '',
       tab: tab ? tab.id : null, owner: tab ? (tab.key === PERSON ? 'person' : 'task') : null,
       task: tab && tab.key !== PERSON ? tab.title : null, holder: tab ? tab.holder : null,
-      front: !!front && front.targetId === t.id,
+      front: !!front && front.targetId === t.id, closable: personMayClose(tab),
     };
   });
+}
+
+/** A person may close any page but one a running task's agent is working in (or one being signed in). */
+function personMayClose(tab) {
+  return !tab || (!tab.locked && (tab.key === PERSON || tab.holder === 'human' || Boolean(tab.finishedAt)));
+}
+
+/** The person closes a page from the overview. */
+async function closeTarget(target) {
+  const found = await pageOfTarget(target);
+  if (!found) return { status: 404, body: { error: 'no_page', message: 'This tab has been closed' } };
+  if (!personMayClose(found.tab)) return { status: 409, body: { error: 'in_use', message: 'A running task is working in this tab' } };
+  await closeKeepingOne([found.page]);
+  return { status: 200, body: { target } };
 }
 
 /** The page behind a Chromium target id, registered or not. */
@@ -1158,13 +1204,16 @@ async function reclaimOnce(reason, need, exceptKey) {
   if (!connecting) await browserContext().catch(() => null);
   const deep = reason === 'poll' ? m.used >= m.max * MEM_CRITICAL : reason !== 'page' || m.used + need > m.max;
   const byAge = (a, b) => a.lastUsed - b.lastUsed;
-  const finished = (t) => t.finishedAt && t.holder !== 'human' && t.key !== exceptKey;
+  const finished = (t) => t.finishedAt && t.holder !== 'human' && t.key !== exceptKey && !t.left;
+  // A finished tab the person took over and left: it gives way like the others, unless it holds something typed.
+  const leftBehind = (t) => t.finishedAt && t.holder !== 'human' && t.key !== exceptKey && t.left;
   const personIdle = (t) => t.key === PERSON && t.key !== exceptKey && Date.now() - t.lastUsed >= PERSON_IDLE_MS;
   // A recorded page still passing its tier's test, not being signed in, and not the one a person looks at.
   const tracked = (test) => (page) => { const t = recordOf(page); return Boolean(t) && !t.locked && t !== frontTab() && test(t); };
   // Each tier: its pages, least valuable first; the test each must still pass when its turn comes; whether it may hold unsaved words.
   const tiers = [
     { pages: () => [...registry.values()].filter(finished).sort(byAge).map((t) => t.page), ok: tracked(finished) },
+    { pages: () => [...registry.values()].filter(leftBehind).sort(byAge).map((t) => t.page), ok: tracked(leftBehind), typed: true },
     { pages: () => [...registry.values()].filter(personIdle).sort(byAge).map((t) => t.page), ok: tracked(personIdle), typed: true },
     ...(deep ? [
       { pages: unusedStrays, ok: (page) => { noteStrays([page]); return !recordOf(page) && strayIdle(page); }, typed: true },
@@ -1646,6 +1695,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/overview/front') {
       const out = await bringTargetFront(String((await readJson(req)).target || ''));
+      return send(res, out.status, out.body);
+    }
+    if (req.method === 'POST' && url.pathname === '/overview/close') {
+      const out = await closeTarget(String((await readJson(req)).target || ''));
       return send(res, out.status, out.body);
     }
     if (req.method === 'POST' && url.pathname === '/finish') {

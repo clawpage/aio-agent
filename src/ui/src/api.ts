@@ -379,6 +379,7 @@ export const api = {
   browserOverview: () => request<{ pages: import("./types").OverviewPage[] }>("/api/browser/overview"),
   browserOverviewShotUrl: (target: string, at: number) => apiUrl(`/api/browser/overview/shot?target=${encodeURIComponent(target)}&at=${at}`),
   browserFront: (target: string) => request<{ target: string }>("/api/browser/overview/front", { method: "POST", body: { target } }),
+  browserClosePage: (target: string) => request<{ target: string }>("/api/browser/overview/close", { method: "POST", body: { target } }),
   openBrowserTab: (url: string, signal?: AbortSignal) =>
     request<{ ok: boolean; message: string; data: unknown; tab?: import("./types").TaskTab }>("/api/browser/tabs", { method: "POST", body: { url }, signal }),
   /** Open a workspace HTML page in full in a new tab of the sandbox's Chromium (no inline size cap). */

@@ -5,9 +5,9 @@ import { openWorkspace } from "./open-workspace";
 
 const picture = fs.readFileSync(new URL("../../src/ui/public/icon-512.png", import.meta.url));
 const pages = [
-  { target: "AAAA0000AAAA0000", title: "Walmart 收纳箱搜索结果", url: "https://www.walmart.com/search?q=storage", tab: "t1", owner: "task", task: "在沃尔玛找收纳箱", holder: "ai", front: true },
-  { target: "BBBB1111BBBB1111", title: "我的订单", url: "https://www.amazon.com/orders", tab: "t2", owner: "person", task: null, holder: "human", front: false },
-  { target: "CCCC2222CCCC2222", title: "", url: "https://example.org/a-very-long-path/that/keeps/going", tab: null, owner: null, task: null, holder: null, front: false },
+  { target: "AAAA0000AAAA0000", title: "Walmart 收纳箱搜索结果", url: "https://www.walmart.com/search?q=storage", tab: "t1", owner: "task", task: "在沃尔玛找收纳箱", holder: "ai", front: true, closable: false },
+  { target: "BBBB1111BBBB1111", title: "我的订单", url: "https://www.amazon.com/orders", tab: "t2", owner: "person", task: null, holder: "human", front: false, closable: true },
+  { target: "CCCC2222CCCC2222", title: "", url: "https://example.org/a-very-long-path/that/keeps/going", tab: null, owner: null, task: null, holder: null, front: false, closable: true },
 ];
 
 async function openBrowser(page: Page) {
@@ -58,6 +58,55 @@ test("the workspace browser shows every open page with a preview and switches to
   await expect(page.getByRole("dialog", { name: "浏览器标签页" })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: "浏览器标签页" })).toHaveCount(0);
+});
+
+test("pages the person no longer needs are closed from the overview; the one a task works in has no close button", async ({ page }, info) => {
+  let live = pages.map(p => ({ ...p }));
+  const closed: string[] = [];
+  let refuse = true;
+  await page.route("**/api/browser/overview", r => r.fulfill({ json: { pages: live } }));
+  await page.route("**/api/browser/overview/shot*", r => r.fulfill({ contentType: "image/png", body: picture }));
+  await page.route("**/api/browser/overview/close", r => {
+    if (refuse) return r.fulfill({ status: 409, json: { error: "in_use", message: "有任务正在用这个页面，暂时不能关闭" } });
+    const target = r.request().postDataJSON().target as string;
+    closed.push(target);
+    live = live.filter(p => p.target !== target);
+    return r.fulfill({ json: { target } });
+  });
+  await openBrowser(page);
+  await page.getByRole("button", { name: "标签页", exact: true }).click();
+  const panel = page.getByRole("dialog", { name: "浏览器标签页" });
+  await expect(panel.locator(".browser-tab-card")).toHaveCount(3);
+  await expect(panel.locator(".browser-tab-close")).toHaveCount(2);
+  await expect(panel.getByRole("button", { name: "关闭页面：Walmart 收纳箱搜索结果" })).toHaveCount(0);
+  // The close button is big enough for a finger, stays inside its card and off the card's text.
+  const button = panel.getByRole("button", { name: "关闭页面：我的订单" });
+  const box = (await button.boundingBox())!, card = (await panel.locator(".browser-tab-card").nth(1).boundingBox())!;
+  expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(32);
+  expect(box.x + box.width).toBeLessThanOrEqual(card.x + card.width);
+  const title = (await panel.locator(".browser-tab-card").nth(1).locator(".browser-tab-title").boundingBox())!;
+  expect(box.y + box.height).toBeLessThanOrEqual(title.y);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await page.screenshot({ path: info.outputPath("browser-tabs-close.png") });
+  if (info.project.use.isMobile) {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await expect(button).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    const head = (await panel.locator(".browser-tabs-head").boundingBox())!, x = (await panel.getByRole("button", { name: "关闭标签页总览" }).boundingBox())!;
+    expect(x.x + x.width).toBeLessThanOrEqual(head.x + head.width + 1);
+    await page.screenshot({ path: info.outputPath("browser-tabs-close-360.png") });
+  }
+  // A refusal is said and the page stays listed.
+  await button.click();
+  await expect(page.getByText("有任务正在用这个页面，暂时不能关闭")).toBeVisible();
+  await expect(panel.locator(".browser-tab-card")).toHaveCount(3);
+  refuse = false;
+  await button.click();
+  await expect(panel.locator(".browser-tab-card")).toHaveCount(2);
+  await expect(panel).toContainText("标签页 · 2");
+  expect(closed).toEqual(["BBBB1111BBBB1111"]);
+  // Closing does not switch pages or close the overview.
+  await expect(panel).toBeVisible();
 });
 
 test("a tab overview that cannot be read says so and a closed page reports back", async ({ page }) => {

@@ -65,6 +65,8 @@ export interface OverviewPage {
   holder: "ai" | "human" | null;
   /** The page a console keeps on top of the desktop right now. */
   front: boolean;
+  /** Whether the person may close it from the overview. */
+  closable: boolean;
 }
 
 /** One sign-in step the agent wrote; `value` may be the placeholder {{username}} or {{password}}. */
@@ -109,6 +111,8 @@ export interface TabServerLike {
   overviewShot?(target: string): Promise<{ mimeType: string; data: string } | null>;
   /** Bring one page of the overview to the front of the desktop for the person. */
   front?(target: string): Promise<PersonResult>;
+  /** Close one page of the overview for the person: any but one a running task's agent works in. */
+  closePage?(target: string): Promise<PersonResult>;
   /** The page a task's browser last showed, kept after its tab is closed. */
   lastPage?(key: string): LastPage | null;
   /** The picture of that page, if one was kept. */
@@ -129,6 +133,7 @@ function worded(body: Record<string, unknown>, login?: "google" | "password"): R
     switch (body.error) {
       case "no_tab": message = m.noTab; break;
       case "no_page": message = m.pageClosed; break;
+      case "in_use": message = m.pageInUse; break;
       case "no_request": message = m.noRequest; break;
       case "busy": message = m.loginBusy; break;
       case "site_changed": message = login === "google" ? m.siteChanged : m.siteChangedNotFilled; break;
@@ -501,11 +506,19 @@ export class TabServer implements TabServerLike {
     return await this.#get(`/overview/shot?target=${target}`);
   }
 
-  async front(target: string): Promise<PersonResult> {
+  front(target: string): Promise<PersonResult> {
+    return this.#onTarget("/overview/front", target);
+  }
+
+  closePage(target: string): Promise<PersonResult> {
+    return this.#onTarget("/overview/close", target);
+  }
+
+  async #onTarget(route: string, target: string): Promise<PersonResult> {
     if (!TARGET.test(target)) return { status: 404, body: { error: "no_page", message: t().browser.tabs.pageClosed } };
     this.#changed();
     const res = await this.#container.execInSandbox(
-      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}/overview/front`],
+      ["curl", "-s", "-m", "20", "-w", "\n%{http_code}", "-X", "POST", "-H", "content-type: application/json", "--data-binary", "@-", `http://127.0.0.1:${TAB_SERVER_PORT}${route}`],
       { timeoutMs: 25_000, stdin: JSON.stringify({ target }) },
     );
     this.#changed();

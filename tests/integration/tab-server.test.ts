@@ -1035,6 +1035,59 @@ it.skipIf(!hasChromium)("keeps a finished tab the person took over, or is lookin
   }
 });
 
+it.skipIf(!hasChromium)("hands a finished task's taken-over tab back when another task opens a page, and lets it give way unless it holds something typed", async () => {
+  await clearTabs();
+  type Page = { target: string; tab: string | null; holder: string | null; closable: boolean };
+  const overview = async () => ((await (await fetch(`${base}/overview`)).json()) as { pages: Page[] }).pages;
+  const closePage = (target: string) => fetch(`${base}/overview/close`, { method: "POST", body: JSON.stringify({ target }) });
+  const takeFinished = async (key: string, typed = "") => {
+    const tab = tabIdOf(await call(key, "browser_navigate", { url: page(key, key) }))!;
+    if (typed) await call(key, "browser_evaluate", { script: `document.querySelector('#q').value = ${JSON.stringify(typed)}` });
+    await post("/finish", { key });
+    expect((await control(tab, "take", key)).status).toBe(200);
+    return tab;
+  };
+  try {
+    // The person took over the pages of three tasks that have since finished, and never handed them back.
+    const typed = await takeFinished("LA", "还没提交的话");
+    const empty = await takeFinished("LB");
+    const watched = await takeFinished("LC");
+    // The console still shows the last one.
+    await post("/pointer", { action: "focus", tab: watched, task: "LC" });
+    setMemory(0.95);
+    const refused = await call("LN", "browser_navigate", { url: page("Needed", "needed") });
+    const left = await records();
+    // The one nobody looks at and holding nothing went; the one with unsent words stays, back with the agent; the watched one is untouched.
+    expect(left.map((t) => t.id).sort()).toEqual([typed, watched].sort());
+    expect(left.find((t) => t.id === typed)).toMatchObject({ holder: "ai", key: "LA" });
+    expect(left.find((t) => t.id === watched)).toMatchObject({ holder: "human" });
+    expect(left.some((t) => t.id === empty)).toBe(false);
+    // Still no room: the task learns which pages the person keeps, to say so instead of only "memory is tight".
+    expect(refused.result?.isError).toBe(true);
+    expect(text(refused)).toContain("Sandbox memory is tight");
+    expect(text(refused)).toContain("The user keeps these pages open");
+    expect(text(refused)).toContain("taken over by the user in the task");
+    expect(text(refused)).toContain("tabs button");
+    // The person closes them from the overview; a running task's own tab is not theirs to close.
+    setMemory(0.1);
+    const running = tabIdOf(await call("LN", "browser_navigate", { url: page("Needed", "needed") }))!;
+    const pages = await overview();
+    const of = (tab: string) => pages.find((p) => p.tab === tab)!;
+    expect(of(typed).closable).toBe(true);
+    expect(of(watched).closable).toBe(true);
+    expect(of(running).closable).toBe(false);
+    const inUse = await closePage(of(running).target);
+    expect(inUse.status).toBe(409);
+    expect(await inUse.json()).toMatchObject({ error: "in_use" });
+    expect((await closePage(of(typed).target)).status).toBe(200);
+    expect((await closePage(of(watched).target)).status).toBe(200);
+    expect((await closePage("FFFFFFFFFFFFFFFF")).status).toBe(404);
+    await expect.poll(async () => (await records()).map((t) => t.id)).toEqual([running]);
+  } finally {
+    setMemory(0.1);
+  }
+}, 60_000);
+
 it.skipIf(!hasChromium)("gives the person a window opened from the tab they hold, and leaves the task's cursor where it was", async () => {
   await clearTabs();
   const site = await siteOf((req, res) => {

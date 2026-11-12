@@ -21,9 +21,10 @@ const fakeTabs: TabServerLike = {
   close: async (tab) => (calls.push(`close:${tab}`), { status: 200, body: { closed: tab } }),
   login: async () => ({ status: 409, body: { error: "no_request" } }),
   screenshot: async (key, tab) => (calls.push(`shot:${key}:${tab}`), tab === "t1" ? { mimeType: "image/jpeg", data: Buffer.from("jpeg-bytes").toString("base64"), url: "u", title: "t" } : null),
-  overview: async () => (calls.push("overview"), [{ target: "A1B2C3D4E5F60718", title: "示例", url: "https://example.com/", tab: "t1", owner: "task", task: "查网页", holder: "ai", front: false }]),
+  overview: async () => (calls.push("overview"), [{ target: "A1B2C3D4E5F60718", title: "示例", url: "https://example.com/", tab: "t1", owner: "task", task: "查网页", holder: "ai", front: false, closable: false }]),
   overviewShot: async (target) => (calls.push(`overview-shot:${target}`), target === "A1B2C3D4E5F60718" ? { mimeType: "image/jpeg", data: Buffer.from("thumb").toString("base64") } : null),
   front: async (target) => (calls.push(`front:${target}`), target === "A1B2C3D4E5F60718" ? { status: 200, body: { target } } : { status: 404, body: { error: "no_page", message: "这个标签页已经关闭" } }),
+  closePage: async (target) => (calls.push(`close-page:${target}`), { status: 409, body: { error: "in_use", message: "有任务正在用这个页面，暂时不能关闭" } }),
 };
 
 beforeAll(async () => {
@@ -155,7 +156,13 @@ it("gives the signed-in person an overview of every open page, a preview of each
   expect((await front("A1B2C3D4E5F60718", {})).status).toBe(403);
   expect((await front("A1B2C3D4E5F60718", { "x-csrf-token": csrf })).status).toBe(200);
   expect((await front("0000000000000000", { "x-csrf-token": csrf })).status).toBe(404);
-  expect(calls).toEqual(expect.arrayContaining(["overview", "overview-shot:A1B2C3D4E5F60718", "front:A1B2C3D4E5F60718"]));
+  // So is closing a page; the tab server decides whether this one may go.
+  const closePage = (headers: Record<string, string>) => h.request("/api/browser/overview/close", { method: "POST", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify({ target: "A1B2C3D4E5F60718" }) });
+  expect((await closePage({})).status).toBe(403);
+  const refused = await closePage({ "x-csrf-token": csrf });
+  expect(refused.status).toBe(409);
+  expect(await refused.json()).toMatchObject({ error: "in_use" });
+  expect(calls).toEqual(expect.arrayContaining(["overview", "overview-shot:A1B2C3D4E5F60718", "front:A1B2C3D4E5F60718", "close-page:A1B2C3D4E5F60718"]));
 });
 
 it("gives one of the account's tasks by id, for a console address that names it", async () => {
