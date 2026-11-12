@@ -48,11 +48,19 @@ async function attachHls(video: HTMLVideoElement, url: string, onFatal: () => vo
   return () => hls.destroy();
 }
 
-function LiveVideo({ entity, onError }: { entity: string; onError: (message: string) => void }) {
+/** How long live video may take to show its first frame: a stream that was asleep needs about 20 seconds. */
+const LIVE_START_TIMEOUT_MS = 45_000;
+
+/** Live video. The snapshot stays on screen until the first frame, so the card is never a black box while the stream starts. */
+function LiveVideo({ entity, poster, onError }: { entity: string; poster: string; onError: (message: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     let detach: (() => void) | null = null;
     let live = true;
+    const el = video.current;
+    const giveUp = setTimeout(() => { if (live) onError(t.cards.camera.dropped); }, LIVE_START_TIMEOUT_MS);
+    const started = () => clearTimeout(giveUp);
+    el?.addEventListener("playing", started);
     void (async () => {
       try {
         const { url } = await api.cameraLive(entity);
@@ -64,9 +72,10 @@ function LiveVideo({ entity, onError }: { entity: string; onError: (message: str
         if (live) onError(messageOf(err));
       }
     })();
-    return () => { live = false; detach?.(); };
+    return () => { live = false; clearTimeout(giveUp); el?.removeEventListener("playing", started); detach?.(); };
   }, [entity, onError]);
-  return <video ref={video} className="camera-media" muted autoPlay playsInline controls crossOrigin={API_BASE ? "use-credentials" : undefined} />;
+  // The element's own error is the only failure signal where the browser plays HLS itself (Safari, iOS).
+  return <video ref={video} className="camera-media" poster={poster} muted autoPlay playsInline controls crossOrigin={API_BASE ? "use-credentials" : undefined} onError={() => onError(t.cards.camera.dropped)} />;
 }
 
 function PlaybackVideo({ entity, at, timeZone, onClock, onError }: { entity: string; at: string; timeZone: string; onClock: (text: string) => void; onError: (message: string) => void }) {
@@ -187,7 +196,7 @@ export function CameraCard({ spec }: { spec: CameraSpec }) {
         ) : mode === "playback" && spec.at ? (
           <PlaybackVideo entity={spec.camera} at={spec.at} timeZone={info.timeZone} onClock={setTime} onError={fail} />
         ) : playing ? (
-          <LiveVideo entity={spec.camera} onError={fail} />
+          <LiveVideo entity={spec.camera} poster={api.cameraSnapshotUrl(spec.camera, shot)} onError={fail} />
         ) : (
           <>
             <img className="camera-media" src={api.cameraSnapshotUrl(spec.camera, shot)} alt={t.cards.camera.label(name)} onError={() => setError(t.cards.camera.unavailable)} />
