@@ -603,7 +603,8 @@ export function TaskChat({ onDetails, onOpenLink, onOpenFileInBrowser, onExpired
         followed.current = n.scrollHeight;
         n.scrollTop = n.scrollHeight;
     }, []);
-    const feed = tasks.flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
+    // A scheduled check that found nothing to tell leaves no trace here; the schedule's own page still leads to it.
+    const feed = tasks.filter(t => !t.quiet).flatMap(t => [{ task: t, report: false, at: t.createdAt }, ...(!t.mergedInto && terminal.has(t.status) ? [{ task: t, report: true, at: t.completedAt ?? t.createdAt }] : draftOf(t) ? [{ task: t, report: true, at: Number.MAX_SAFE_INTEGER }] : [])])
         .sort((a, b) => a.at - b.at || Number(a.report) - Number(b.report) || a.task.id.localeCompare(b.task.id));
     return <WidgetComposer.Provider value={fillComposer}><section className="chat task-chat">
     {dislikedTask && <FeedbackDialog taskId={dislikedTask} onClose={() => setDislikedTask(null)}/>}

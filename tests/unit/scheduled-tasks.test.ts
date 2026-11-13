@@ -113,6 +113,34 @@ describe("running schedules", () => {
     expect(turn.text).toContain("do not ask a question and wait");
   });
 
+  it("keeps a run that found nothing to tell out of the feed and off the phone", async () => {
+    const id = schedules()[0]!.id;
+    const told: string[] = [];
+    tasks.setNotifier((task) => told.push(task.id));
+    const run = async (emit: (threadId: string, turnId: string) => void) => {
+      due(id); fire(); await tick();
+      const turn = codex.startedTurns.at(-1)!;
+      emit(turn.threadId, turn.turnId);
+      codex.completeTurn(turn.turnId);
+      await tick();
+      return tasks.view(tasks.get(schedules()[0]!.last_task_id!)!);
+    };
+    const say = (threadId: string, turnId: string, id: string, phase: string, text: string) =>
+      codex.emitNotification("item/completed", { threadId, turnId, item: { id, type: "agentMessage", phase, text } });
+    expect(codex.startedTurns.length).toBe(0);
+    // Said so with the marker: the note stays for the history, the marker is not shown.
+    const marked = await run((th, tu) => say(th, tu, "a", "final_answer", "三家都是 $79.99，没有达标。\n<!--nothing-to-report-->"));
+    expect(codex.startedTurns.at(-1)!.text).toContain("<!--nothing-to-report-->");
+    expect(marked).toMatchObject({ status: "completed", quiet: true, result: "三家都是 $79.99，没有达标。" });
+    // An empty final answer: what it said on the way is not passed off as the result.
+    const empty = await run((th, tu) => { say(th, tu, "a", "commentary", "我会核查各商家的价格。"); say(th, tu, "b", "final_answer", ""); });
+    expect(empty).toMatchObject({ status: "completed", quiet: true, result: null });
+    // Something to tell: shown and notified as before.
+    const found = await run((th, tu) => say(th, tu, "a", "final_answer", "Sweetwater 降到 $59.99。"));
+    expect(found).toMatchObject({ status: "completed", quiet: false, result: "Sweetwater 降到 $59.99。" });
+    expect(told).toEqual([found.id]);
+  });
+
   it("does not stack runs while the previous one is still going, and gives the next run the previous result", async () => {
     const id = schedules()[0]!.id;
     due(id); fire(); await tick();

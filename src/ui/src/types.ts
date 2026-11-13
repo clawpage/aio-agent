@@ -206,6 +206,8 @@ export interface Task {
   attachments: Attachment[];
   relatedTaskId: string | null;
   relatedTaskTitle?: string | null;
+  /** A scheduled run that finished with nothing to tell the person: left out of the feed. */
+  quiet?: boolean;
   dependencies: string[];
   approvals: number;
   createdAt: number;

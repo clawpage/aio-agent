@@ -129,6 +129,8 @@ interface FeedMemoryRow { id: string; owner_id: string; kind: FeedMemoryKind; te
 /** The machine-readable lines a feed run ends with; never shown to the person. */
 const FEED_TOPICS = /<!--\s*feed-topics:\s*(\[[\s\S]*?\])\s*-->/;
 const FEED_EMPTY = /<!--\s*feed-empty\s*-->/;
+/** A scheduled run that found nothing the person asked to be told ends its answer with this: no notification, no card in the feed. */
+const NOTHING_TO_REPORT = /\s*<!--\s*nothing-to-report\s*-->\s*/g;
 const FEED_MARKERS = /\s*<!--\s*feed-(?:topics:[\s\S]*?|empty\s*)-->\s*/g;
 /** An account nobody opened for this long has all its schedules paused when the next one is due. */
 const SCHEDULES_IDLE_PAUSE_MS = 14 * 86_400_000;
@@ -358,6 +360,8 @@ export class TaskService {
         if (!this.#notifier) return;
         // A daily feed with nothing to say stays silent on the phone.
         if (row.schedule_id && FEED_EMPTY.test(row.result ?? "") && this.scheduleRow(row.schedule_id)?.builtin === DAILY_FEED) return;
+        // A scheduled check with nothing to tell does not ring either.
+        if (this.quietRun(row)) return;
         // The gadget speaks its own answers; the phone stays quiet.
         if (row.client_message_id.startsWith(GADGET_PREFIX)) return;
         if (["completed", "failed", "unknown", "needs_input"].includes(row.status)) {
@@ -387,6 +391,8 @@ export class TaskService {
             clientMessageId: row.client_message_id,
             // A task waiting for the person carries what its executor wrote before the question (the draft it asks about).
             status: row.status, result: TERMINAL.has(row.status) || row.status === "needs_input" ? this.shownResult(row) : null, error: row.error,
+            // A scheduled run with nothing to tell: the feed leaves it out, the schedule's history keeps it.
+            quiet: this.quietRun(row),
             attachments: JSON.parse(row.attachments_json) as TurnAttachment[], relatedTaskId: row.related_task_id,
             relatedTaskTitle: row.related_task_id ? this.get(row.related_task_id)?.title ?? null : null,
             description: plan?.description ?? null,
@@ -1297,7 +1303,9 @@ export class TaskService {
         const items = messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && typeof i.text === "string" && i.text.trim());
         // The last answer stands, also after a supplement mid-turn: the executor carries over
         // what still holds from an earlier answer and drops what the supplement overturned.
-        const last = items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
+        // A scheduled run that ends on an empty final answer chose to say nothing: what it said on the way is not its result.
+        const silent = !!row.schedule_id && turn.status === "completed" && messages.map(m => JSON.parse(m.payload).item).filter(i => i?.type === "agentMessage" && i.phase === "final_answer").at(-1)?.text?.trim() === "";
+        const last = silent ? undefined : items.filter(i => i.phase === "final_answer").at(-1) ?? items.at(-1);
         const question = turn.status === "completed" && !row.schedule_id && last?.text ? executorQuestion(last.text) : null;
         const plan = question && row.plan_json ? JSON.parse(row.plan_json) as TaskPlan : null;
         if (plan && question) { plan.clarification = question.question; plan.options = question.options ?? undefined; plan.form = question.form ?? undefined; }
@@ -1305,7 +1313,7 @@ export class TaskService {
         // The model gateway turned the turn away once the day's tokens ran out: say so, and when they come back.
         const resetsAt = turn.status === "failed" ? this.overQuota() : null;
         this.db.prepare("UPDATE tasks SET status=?,result=?,error=?,completed_at=?,plan_json=COALESCE(?,plan_json) WHERE id=?")
-            .run(status, question ? question.result : last?.text ?? null, resetsAt !== null ? limitMessage(resetsAt, this.accountZone()) : turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
+            .run(status, question ? question.result : silent ? "<!--nothing-to-report-->" : last?.text ?? null, resetsAt !== null ? limitMessage(resetsAt, this.accountZone()) : turn.error, turn.completed_at, plan ? JSON.stringify(plan) : null, row.id);
         if (status === "completed") { this.recordFeed(this.get(row.id)!); this.#onCompleted?.(row.id); }
         this.notifyChange(row.id, row.status);
     }
@@ -1376,8 +1384,18 @@ export class TaskService {
     }
     /** A feed run's machine lines (topics, nothing-today) stay out of what the person reads. */
     private shownResult(row: TaskRow): string | null {
-        if (!row.result || !row.schedule_id || this.scheduleRow(row.schedule_id)?.builtin !== DAILY_FEED) return row.result;
+        if (!row.result || !row.schedule_id) return row.result;
+        if (this.scheduleRow(row.schedule_id)?.builtin !== DAILY_FEED) return row.result.replace(NOTHING_TO_REPORT, "\n").trim() || null;
         return row.result.replace(FEED_MARKERS, "\n").trim();
+    }
+    /**
+     * A scheduled run (not the daily feed) that finished with nothing to tell the person: it said so
+     * with the marker (an empty final answer is recorded as the marker alone). It is kept in the schedule's history only.
+     */
+    private quietRun(row: TaskRow): boolean {
+        if (!row.schedule_id || row.status !== "completed" || this.scheduleRow(row.schedule_id)?.builtin === DAILY_FEED) return false;
+        NOTHING_TO_REPORT.lastIndex = 0;
+        return NOTHING_TO_REPORT.test(row.result ?? "");
     }
     /** Every account gets the daily feed once; afterwards it is the person's to pause or resume. */
     private ensureDailyFeed(): void {
@@ -1826,7 +1844,7 @@ export class TaskService {
         const rule = s ? ` (${describeSchedule(JSON.parse(s.spec_json) as ScheduleSpec)})` : "";
         const plan = JSON.parse(row.plan_json!) as TaskPlan;
         const condition = plan.conditionOutput === undefined ? "" : ` It started because its condition check (a script run in the sandbox before each due time) was met${plan.conditionOutput ? `; the check printed:\n\`\`\`\n${plan.conditionOutput}\n\`\`\`\nUse this as the reason it fired.` : " (the check printed nothing)."}`;
-        return `This is run ${n} of the scheduled task "${row.title}"${rule}, started automatically at ${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)}. The user is not in the conversation right now: finish the work and report the result directly, write anything that needs the user's decision or confirmation into the result, do not ask a question and wait, and do not create another schedule.${plan.related.length ? " The background includes the previous run's result, so you can say what changed since then." : ""}${condition}`;
+        return `This is run ${n} of the scheduled task "${row.title}"${rule}, started automatically at ${formatWhen(row.created_at, s?.timezone ?? this.cfg.browser.timezone)}. The user is not in the conversation right now: finish the work and report the result directly, write anything that needs the user's decision or confirmation into the result, do not ask a question and wait, and do not create another schedule. When the task or the user's standing agreements say to stay quiet unless something is found (a threshold not reached, nothing new), and this run found nothing to tell: do the whole check all the same, then make the final answer one or two lines on what you checked and found, ending with a line that is exactly <!--nothing-to-report-->. The user is then not notified and the run is kept in the schedule's history only. Never end with an empty final answer.${plan.related.length ? " The background includes the previous run's result, so you can say what changed since then." : ""}${condition}`;
     }
     private viewSchedule(s: ScheduleRow) {
         const last = s.last_task_id ? this.get(s.last_task_id) : null;
