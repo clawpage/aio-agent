@@ -2900,9 +2900,14 @@ export function createApiRouter(context: AppContext): Router {
       const at = cameraTime(req.query.at);
       if (at === null) { res.status(400).json({ error: "bad_time", message: t().http.cameras.badTime }); return; }
       const { piece, offset, next } = await cameras.locate(entity, at);
+      // Without an index (the piece still being written, or one cut short) the bare file is played instead.
+      const indexed = await cameras.playlist(entity, piece).catch(() => null);
       res.setHeader("Cache-Control", "no-store");
+      const url = `/api/cameras/${entity}/recordings/${encodeURIComponent(piece.file)}`;
       res.json({
-        url: `/api/cameras/${entity}/recordings/${encodeURIComponent(piece.file)}`,
+        url,
+        // Seeks without reading the piece from its start (see playlistOf).
+        hls: indexed ? `${url}.m3u8` : null,
         offset, start: piece.start, end: piece.end,
         // The next piece plays on when it follows straight after this one.
         next: next && next.start - piece.end < 60_000 ? next.start : null,
@@ -2920,9 +2925,41 @@ export function createApiRouter(context: AppContext): Router {
       res.end(bytes);
     }),
   );
+  // The save button on a recording: a short clip from the moment on screen (camera_recording_clip is the tool for more).
+  router.get("/cameras/:entity/clip", requireKind("primary"), requireSession,
+    cameraHandler(async (req, res, cameras, entity) => {
+      const at = cameraTime(req.query.at);
+      if (at === null) { res.status(400).json({ error: "bad_time", message: t().http.cameras.badTime }); return; }
+      const seconds = Math.min(600, Math.max(5, Number(req.query.seconds) || 60));
+      const clip = await cameras.clip(entity, at, at + seconds * 1000);
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Content-Disposition", "attachment");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.end(clip.bytes);
+    }),
+  );
   router.get("/cameras/:entity/recordings/:file", requireKind("primary"), requireSession,
     cameraHandler(async (req, res, cameras, entity) => {
-      await cameras.proxyPiece(entity, param(req, "file"), req.get("range") ?? undefined, res);
+      const file = param(req, "file");
+      if (file.endsWith(".m3u8")) {
+        const piece = (await cameras.pieces(entity)).find((p) => p.file === file.slice(0, -5));
+        const playlist = piece && await cameras.playlist(entity, piece);
+        if (!playlist) throw new CameraError("not_found");
+        res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+        res.setHeader("Cache-Control", "private, max-age=300");
+        res.end(playlist);
+        return;
+      }
+      const part = /^(\d{1,12})-(\d{1,12})$/.exec(typeof req.query.part === "string" ? req.query.part : "");
+      if (part) {
+        const bytes = await cameras.segment(entity, file, Number(part[1]), Number(part[2]));
+        res.setHeader("Content-Type", "video/mp4");
+        res.setHeader("Cache-Control", "private, max-age=3600");
+        res.end(bytes);
+        return;
+      }
+      await cameras.proxyPiece(entity, file, req.get("range") ?? undefined, res);
     }),
   );
 

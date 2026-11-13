@@ -7,7 +7,7 @@ import { WebSocketServer } from "ws";
 import { startHarness, login } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
 import { HaGateway } from "../../src/control/ha.js";
-import { HaCameras, eventsOf, formatLocal, parseLocal, piecesOf, rebaseFragments, syncPointsOf, videoTrackOf } from "../../src/control/camera.js";
+import { HaCameras, eventsOf, formatLocal, parseLocal, piecesOf, playlistOf, rebaseFragments, segmentOf, syncPointsOf, videoTrackOf } from "../../src/control/camera.js";
 import { parseCameras } from "../../src/control/config.js";
 import { memberConfig } from "../../src/control/tenants.js";
 
@@ -181,6 +181,31 @@ describe("camera helpers", () => {
     expect(cut.readBigUInt64BE(8 + 8 + 8 + 8)).toBe(BigInt(moofs[2]! + 40));
   });
 
+  it("lists a piece as one playlist segment per key frame and makes each part playable on its own", () => {
+    const { file, initEnd, moofs } = indexedPiece();
+    const dataEnd = file.lastIndexOf(Buffer.from("mfra")) - 4;
+    const points = moofs.map((offset, i) => ({ time: i * 180000, offset }));
+    const lines = playlistOf({ track: { trackId: 1, timescale: 90000, initEnd }, points, dataEnd }, "a.mp4", 10).split("\n");
+    expect(lines).toContain(`#EXT-X-MAP:URI="a.mp4",BYTERANGE="${initEnd}@0"`);
+    expect(lines.filter((l) => l.startsWith("a.mp4?part="))).toEqual(moofs.map((offset, i) => `a.mp4?part=${offset}-${moofs[i + 1] ?? dataEnd}`));
+    // Three 2-second segments, and the last runs to the piece's end.
+    expect(lines.filter((l) => l.startsWith("#EXTINF:"))).toEqual(["#EXTINF:2.000,", "#EXTINF:2.000,", "#EXTINF:2.000,", "#EXTINF:4.000,"]);
+    expect(lines.at(-2)).toBe("#EXT-X-ENDLIST");
+
+    // A fragment with a data offset (trun), as ffmpeg writes it: the absolute base goes, the offset counts from the fragment.
+    const trun = box("trun", u32(1, 1, 0)); // flags: data offset present; one sample; offset filled below
+    const moofSize = 8 + 8 + 24 + trun.length;
+    const at = 1000;
+    const moof = box("moof", box("traf", box("tfhd", u32(1, 1), u64(at)), trun));
+    moof.writeInt32BE(moofSize + 8, moofSize - 4); // the data starts after the mdat header
+    const out = segmentOf(Buffer.concat([moof, box("mdat", Buffer.from("frame"))]), at);
+    expect(out.length).toBe(moofSize - 8 + 13);
+    expect([out.readUInt32BE(0), out.readUInt32BE(8), out.readUInt32BE(16)]).toEqual([moofSize - 8, 8 + 16 + trun.length, 16]);
+    expect(out.readUInt32BE(24)).toBe(0x020000); // default-base-is-moof, no base data offset
+    const dataAt = out.readInt32BE(out.readUInt32BE(0) - 4);
+    expect(out.toString("latin1", dataAt, dataAt + 5)).toBe("frame");
+  });
+
   it("reads recording pieces and events from file names, in local time", () => {
     const at = parseLocal("2026-10-13 21:09:17")!;
     expect(formatLocal(at)).toBe("2026-10-13 21:09:17");
@@ -340,6 +365,22 @@ it("serves camera cards only to accounts granted Home Assistant: info, snapshot,
     expect([piece.status, piece.headers.get("content-range"), await piece.text()]).toEqual([206, "bytes 2-5/10", "2345"]);
     expect(ha.seen.rest.at(-1)).toMatchObject({ url: `/media/c201/${ha.pieces[2]}`, range: "bytes=2-5", auth: `Bearer ${TOKEN}` });
     expect((await get("/api/cameras/camera.c201/recordings/..%2F..%2Fconfiguration.yaml")).status).toBe(404);
+    // A finished piece plays from a playlist: its parts are fetched one by one, not the file from its start.
+    expect(playback.hls).toBeNull();
+    expect(first.hls).toBe(`/api/cameras/camera.c201/recordings/${ha.pieces[0]}.m3u8`);
+    const list = await get(first.hls);
+    expect([list.status, list.headers.get("content-type")]).toEqual([200, "application/vnd.apple.mpegurl"]);
+    const parts = (await list.text()).split("\n").filter((l) => l.includes("?part="));
+    const { moofs } = indexedPiece();
+    expect(parts[1]).toBe(`${ha.pieces[0]}?part=${moofs[1]}-${moofs[2]}`);
+    const part = await get(`/api/cameras/camera.c201/recordings/${parts[1]}`);
+    const bytes = Buffer.from(await part.text(), "latin1");
+    expect([part.status, part.headers.get("content-type"), bytes.length]).toEqual([200, "video/mp4", moofs[2]! - moofs[1]! - 8]);
+    expect(bytes.subarray(-6).toString()).toBe("frame1");
+    expect(ha.seen.rest.at(-1)).toMatchObject({ url: `/media/c201/${ha.pieces[0]}`, range: `bytes=${moofs[1]}-${moofs[2]! - 1}` });
+    expect((await get(`/api/cameras/camera.c201/recordings/${ha.pieces[0]}?part=0-99999999999`)).status).toBe(404);
+    expect((await get(`/api/cameras/camera.c201/recordings/${name("c201_", ha.t0 - 3600_000)}.m3u8`)).status).toBe(404);
+    expect((await get("/api/cameras/camera.c201/clip?at=nonsense")).status).toBe(400);
 
     const ptz = (body: unknown, headers: Record<string, string>) => h.request("/api/cameras/camera.c201/ptz", { method: "POST", headers: { cookie, "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     expect((await ptz({ direction: "up" }, {})).status).toBe(403);
@@ -348,7 +389,7 @@ it("serves camera cards only to accounts granted Home Assistant: info, snapshot,
     expect(ha.seen.rest.at(-1)).toMatchObject({ url: "/api/services/tapo_ptz/move", body: JSON.stringify({ x: 0, y: 10 }) });
 
     // A camera kept to other accounts doesn't exist for this one, whichever card route asks.
-    for (const p of ["", "/snapshot", "/live", "/frame?at=1", "/playback?at=1"]) {
+    for (const p of ["", "/snapshot", "/live", "/frame?at=1", "/playback?at=1", "/clip?at=1"]) {
       const r = await get(`/api/cameras/camera.ring${p}`);
       expect([p, r.status, ((await r.json()) as { error: string }).error]).toEqual([p, 404, "not_found"]);
     }

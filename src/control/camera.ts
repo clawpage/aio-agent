@@ -27,6 +27,8 @@ const PIECE_SECONDS = 600;
 /** An HLS session HA handed out stays usable this long after its last request. */
 const HLS_IDLE_MS = 10 * 60_000;
 const MAX_FRAMES = 6;
+/** The most one playlist segment may hold: a key frame interval at many times the cameras' bit rate. */
+const MAX_SEGMENT_BYTES = 32 * 1024 * 1024;
 /** The longest clip cut from the recording: about 110 MB at the cameras' bit rate. */
 const MAX_CLIP_SECONDS = 600;
 /** One ffmpeg run while cutting a clip. */
@@ -175,6 +177,64 @@ export function rebaseFragments(body: Buffer, shift: number): Buffer {
     }
   }
   return out;
+}
+
+/**
+ * Fragments cut out of a file at byte `at`, as a media segment a browser's player takes: ffmpeg's muxer
+ * writes each track fragment's data position as an absolute file offset (tfhd base data offset), which
+ * players refuse in a segment, so it is rewritten relative to the fragment (default-base-is-moof).
+ */
+export function segmentOf(body: Buffer, at: number): Buffer {
+  const parts: Buffer[] = [];
+  let copied = 0;
+  for (const moof of boxes(body)) {
+    if (moof.type !== "moof") continue;
+    const out = Buffer.from(body.subarray(moof.start, moof.end));
+    const cuts: number[] = []; // where, in `out`, an 8-byte base data offset is dropped
+    const runs: Array<{ field: number; base: number }> = [];
+    for (const traf of boxes(body, moof.body, moof.end)) {
+      const tfhd = traf.type === "traf" ? childBox(body, traf, "tfhd") : undefined;
+      if (!tfhd || !(body.readUInt32BE(tfhd.body) & 0x000001) || tfhd.body + 16 > tfhd.end) continue;
+      const base = Number(body.readBigUInt64BE(tfhd.body + 8));
+      out.writeUInt32BE((body.readUInt32BE(tfhd.body) & ~0x000001) | 0x020000, tfhd.body - moof.start);
+      for (const box of [tfhd, traf]) out.writeUInt32BE(box.end - box.start - 8, box.start - moof.start);
+      cuts.push(tfhd.body + 8 - moof.start);
+      for (const trun of boxes(body, traf.body, traf.end)) {
+        if (trun.type === "trun" && body.readUInt32BE(trun.body) & 0x000001) runs.push({ field: trun.body + 8 - moof.start, base });
+      }
+    }
+    if (!cuts.length) continue;
+    // The data moves closer to the fragment's start by what was dropped before it.
+    for (const run of runs) out.writeInt32BE(run.base + out.readInt32BE(run.field) - (at + moof.start) - cuts.length * 8, run.field);
+    out.writeUInt32BE(out.length - cuts.length * 8, 0);
+    parts.push(body.subarray(copied, moof.start));
+    let from = 0;
+    for (const cut of cuts) { parts.push(out.subarray(from, cut)); from = cut + 8; }
+    parts.push(out.subarray(from));
+    copied = moof.end;
+  }
+  parts.push(body.subarray(copied));
+  return Buffer.concat(parts);
+}
+
+/**
+ * A finished piece as an HLS playlist, one segment per key frame, each a part of the piece by its byte offsets.
+ * A browser given the bare file has to read it from the start to reach a moment (the fragments carry no
+ * index a player uses); with the playlist it fetches only the init segment and the fragments it plays.
+ */
+export function playlistOf(index: Pick<PieceIndex, "track" | "points" | "dataEnd">, uri: string, seconds: number): string {
+  const starts = index.points.filter((p, i, all) => i === 0 || p.offset > all[i - 1]!.offset);
+  const time = (i: number) => starts[i]!.time / index.track.timescale;
+  const lengths = starts.map((_, i) => Math.max(0.001, (i + 1 < starts.length ? time(i + 1) : Math.max(seconds, time(i) + 0.001)) - time(i)));
+  const lines = [
+    "#EXTM3U", "#EXT-X-VERSION:7", `#EXT-X-TARGETDURATION:${Math.ceil(Math.max(...lengths))}`, "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-INDEPENDENT-SEGMENTS",
+    `#EXT-X-MAP:URI="${uri}",BYTERANGE="${index.track.initEnd}@0"`,
+  ];
+  starts.forEach((p, i) => {
+    const end = starts[i + 1]?.offset ?? index.dataEnd;
+    lines.push(`#EXTINF:${lengths[i]!.toFixed(3)},`, `${uri}?part=${p.offset}-${end}`);
+  });
+  return [...lines, "#EXT-X-ENDLIST", ""].join("\n");
 }
 
 /** A track's random access points from an mfra box: (time in the track's timescale, moof offset), by time. */
@@ -347,6 +407,7 @@ export class HaCameras {
   #log: Logger;
   #ffmpeg: string;
   #lists = new Map<string, { at: number; files: Promise<string[]> }>();
+  #indexes = new Map<string, PieceIndex>();
   /** HLS sessions this process handed out: token -> last use. */
   #hls = new Map<string, number>();
 
@@ -557,6 +618,18 @@ export class HaCameras {
 
   /** A piece's init segment, video track and key frames, from its index at the end; null for a piece without one. */
   async #index(path: string): Promise<PieceIndex | null> {
+    const kept = this.#indexes.get(path);
+    if (kept) return kept;
+    const index = await this.#readIndex(path);
+    if (index) {
+      // A finished piece never changes; the few a person is watching are kept.
+      if (this.#indexes.size >= 16) this.#indexes.delete(this.#indexes.keys().next().value!);
+      this.#indexes.set(path, index);
+    }
+    return index;
+  }
+
+  async #readIndex(path: string): Promise<PieceIndex | null> {
     const tail = await this.#range(path, "bytes=-16");
     if (tail.bytes.length !== 16 || tail.bytes.toString("latin1", 4, 8) !== "mfro") return null;
     const mfraSize = tail.bytes.readUInt32BE(12);
@@ -734,6 +807,24 @@ export class HaCameras {
     res.writeHead(upstream.status, { "content-type": upstream.headers.get("content-type") ?? "application/octet-stream", "cache-control": "no-store" });
     if (upstream.body) Readable.fromWeb(upstream.body as never).on("error", () => res.destroy()).pipe(res);
     else res.end();
+  }
+
+  /** A piece's playlist (see playlistOf); null for the piece still being written, which has no index yet. */
+  async playlist(entity: string, piece: RecordingPiece): Promise<string | null> {
+    const folder = this.#cameras[entity]?.recordings;
+    if (!folder || !PIECE.test(piece.file)) throw new CameraError("not_found");
+    const index = await this.#index(`/media/${folder}/${encodeURIComponent(piece.file)}`);
+    return index && playlistOf(index, encodeURIComponent(piece.file), (piece.end - piece.start) / 1000);
+  }
+
+  /** One of a playlist's segments: the piece's bytes `from` to `to` (exclusive), made playable on their own. */
+  async segment(entity: string, file: string, from: number, to: number): Promise<Buffer> {
+    const folder = this.#cameras[entity]?.recordings;
+    if (!folder || !PIECE.test(file) || !(from >= 0 && to > from && to - from <= MAX_SEGMENT_BYTES)) throw new CameraError("not_found");
+    const body = await this.#range(`/media/${folder}/${encodeURIComponent(file)}`, `bytes=${from}-${to - 1}`).catch((err) => {
+      throw err instanceof CameraError ? new CameraError("not_found") : err;
+    });
+    return segmentOf(body.bytes, from);
   }
 
   /** Relay a recording piece to a video element, with ranges so it can seek. */

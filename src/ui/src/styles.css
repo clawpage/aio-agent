@@ -4558,6 +4558,8 @@ button.map-card-switch { flex: 0 0 auto; padding: 4px 10px; }
 .camera-play svg { width: 28px; height: 28px; margin-left: 3px; fill: currentColor; }
 .camera-play:hover { background: var(--scrim-strong); }
 .camera-chip { position: absolute; top: 10px; left: 50%; padding: 4px 10px; transform: translateX(-50%); color: var(--media-text); font-size: 12px; background: var(--media-chip-strong); border-radius: 999px; }
+/* Under the picture: over it, a button would cover the player's own controls (iOS draws them along the top too). */
+.camera-foot { display: flex; justify-content: flex-end; padding: 6px 12px; }
 /* The arrows sit at the picture's edges, clear of the video controls along the bottom. */
 .camera-ptz { position: absolute; inset: 0; pointer-events: none; }
 .camera-ptz button {

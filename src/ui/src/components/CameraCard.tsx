@@ -2,9 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiUrl, API_BASE, ApiError, type CameraInfo } from "../api";
 import type { CameraSpec } from "../cameraBlocks";
 import { useNearViewport } from "./ProductCards";
+import { downloadFile } from "../saveFile";
 import { locale, t } from "../i18n";
 
-type Playback = { url: string; offset: number; start: number; end: number; next: number | null };
+type Playback = { url: string; hls?: string | null; offset: number; start: number; end: number; next: number | null };
 type Direction = "left" | "right" | "up" | "down";
 
 const SNAPSHOT_REFRESH_MS = 10_000;
@@ -18,6 +19,18 @@ function clock(ms: number, timeZone: string, withDate: boolean): string {
   }
 }
 
+/** The same moment as a file name stamp: 2026-11-12_16-54-00. */
+function stamp(ms: number, timeZone: string): string {
+  try {
+    return new Intl.DateTimeFormat("sv-SE", { timeZone, dateStyle: "short", timeStyle: "medium" }).format(ms).replace(" ", "_").replace(/:/g, "-");
+  } catch {
+    return String(ms);
+  }
+}
+
+/** What the save button on a recording keeps, from the moment on screen. */
+const SAVE_SECONDS = 60;
+
 function messageOf(err: unknown): string {
   if (err instanceof ApiError && err.status === 404 && err.code === "camera_unavailable") return t.cards.camera.noAccess;
   return err instanceof Error && err.message ? err.message : t.cards.camera.unavailable;
@@ -28,12 +41,15 @@ function messageOf(err: unknown): string {
  * iOS, the iOS app), otherwise through hls.js, loaded only when needed. Chrome
  * also answers "maybe" for HLS now, but its built-in player cannot parse Home
  * Assistant's low-latency playlists (DEMUXER_ERROR_COULD_NOT_PARSE).
+ * `startAt` is for a recording: where in it to begin, in seconds.
  */
-async function attachHls(video: HTMLVideoElement, url: string, onFatal: () => void): Promise<() => void> {
+async function attachHls(video: HTMLVideoElement, url: string, onFatal: () => void, startAt?: number): Promise<() => void> {
   const native = Boolean(video.canPlayType("application/vnd.apple.mpegurl"));
   const playNatively = () => {
+    const seek = () => { if (startAt) video.currentTime = startAt; };
+    video.addEventListener("loadedmetadata", seek, { once: true });
     video.src = url;
-    return () => { video.removeAttribute("src"); video.load(); };
+    return () => { video.removeEventListener("loadedmetadata", seek); video.removeAttribute("src"); video.load(); };
   };
   if (native && navigator.vendor.startsWith("Apple")) return playNatively();
   const { default: Hls } = await import("hls.js");
@@ -41,7 +57,7 @@ async function attachHls(video: HTMLVideoElement, url: string, onFatal: () => vo
     if (native) return playNatively();
     throw new Error(t.cards.camera.unsupported);
   }
-  const hls = new Hls({ enableWorker: false, lowLatencyMode: true, backBufferLength: 30, xhrSetup: (xhr) => { xhr.withCredentials = Boolean(API_BASE); } });
+  const hls = new Hls({ enableWorker: false, lowLatencyMode: startAt === undefined, backBufferLength: 30, ...(startAt === undefined ? {} : { startPosition: startAt }), xhrSetup: (xhr) => { xhr.withCredentials = Boolean(API_BASE); } });
   hls.on(Hls.Events.ERROR, (_e, data) => { if (data.fatal) onFatal(); });
   hls.loadSource(url);
   hls.attachMedia(video);
@@ -78,37 +94,70 @@ function LiveVideo({ entity, poster, onError }: { entity: string; poster: string
   return <video ref={video} className="camera-media" poster={poster} muted autoPlay playsInline controls crossOrigin={API_BASE ? "use-credentials" : undefined} onError={() => onError(t.cards.camera.dropped)} />;
 }
 
-function PlaybackVideo({ entity, at, timeZone, onClock, onError }: { entity: string; at: string; timeZone: string; onClock: (text: string) => void; onError: (message: string) => void }) {
+/**
+ * A recording from a moment. Nothing of the video is fetched until it is started: the picture at that moment
+ * stands in. It then plays the piece's playlist, which reaches the moment without reading the piece from its
+ * start; a piece without one (still being written) plays as the bare file.
+ */
+function PlaybackVideo({ entity, at, onTime, onError }: { entity: string; at: string; onTime: (ms: number) => void; onError: (message: string) => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [piece, setPiece] = useState<Playback | null>(null);
+  const [started, setStarted] = useState(false);
   const [ended, setEnded] = useState(false);
-  const autoplay = useRef(false);
+  const [still, setStill] = useState(true);
   useEffect(() => {
     let live = true;
     api.cameraPlayback(entity, at).then((p) => { if (live) setPiece(p); }, (err) => { if (live) onError(messageOf(err)); });
     return () => { live = false; };
   }, [entity, at, onError]);
-  useEffect(() => { if (piece) onClock(clock(piece.start + piece.offset * 1000, timeZone, true)); }, [piece, timeZone, onClock]);
+  useEffect(() => { if (piece) onTime(piece.start + piece.offset * 1000); }, [piece, onTime]);
+  useEffect(() => {
+    const el = video.current;
+    if (!started || !piece || !el) return;
+    let live = true;
+    let detach: (() => void) | null = null;
+    const play = () => void el.play().catch(() => undefined);
+    const plain = () => {
+      el.src = `${apiUrl(piece.url)}#t=${piece.offset.toFixed(1)}`;
+      play();
+      return () => { el.removeAttribute("src"); el.load(); };
+    };
+    if (!piece.hls) detach = plain();
+    else {
+      void attachHls(el, apiUrl(piece.hls), () => onError(t.cards.camera.recordingGone), piece.offset).then(
+        (d) => { if (live) { detach = d; play(); } else d(); },
+        () => { if (live) detach = plain(); },
+      );
+    }
+    return () => { live = false; detach?.(); };
+  }, [started, piece, onError]);
   const playOn = useCallback(() => {
     if (!piece?.next) { setEnded(true); return; }
-    autoplay.current = true;
     api.cameraPlayback(entity, piece.next).then((p) => setPiece({ ...p, offset: 0 }), (err) => onError(messageOf(err)));
   }, [entity, piece, onError]);
   if (!piece) return <div className="camera-media camera-wait">{t.cards.camera.loading}</div>;
+  if (!started) {
+    return (
+      <>
+        {still
+          ? <img className="camera-media" src={api.cameraFrameUrl(entity, Math.round(piece.start + piece.offset * 1000))} alt="" onError={() => setStill(false)} />
+          : <div className="camera-media" />}
+        <button type="button" className="camera-play" onClick={() => setStarted(true)} aria-label={t.cards.camera.startRecording}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z" /></svg>
+        </button>
+      </>
+    );
+  }
   return (
     <>
       <video
         ref={video}
         key={piece.url}
         className="camera-media"
-        src={`${apiUrl(piece.url)}#t=${piece.offset.toFixed(1)}`}
-        poster={api.cameraFrameUrl(entity, Math.round(piece.start + piece.offset * 1000))}
-        preload="metadata"
         controls
         playsInline
-        autoPlay={autoplay.current}
         crossOrigin={API_BASE ? "use-credentials" : undefined}
-        onTimeUpdate={(e) => onClock(clock(piece.start + e.currentTarget.currentTime * 1000, timeZone, true))}
+        onTimeUpdate={(e) => onTime(piece.start + e.currentTarget.currentTime * 1000)}
         onPlay={() => setEnded(false)}
         onEnded={playOn}
         onError={() => onError(t.cards.camera.recordingGone)}
@@ -129,7 +178,7 @@ export function CameraCard({ spec }: { spec: CameraSpec }) {
   const [shot, setShot] = useState(() => Date.now());
   const [moving, setMoving] = useState(false);
   const [note, setNote] = useState<string | null>(null);
-  const [time, setTime] = useState<string | null>(null);
+  const [time, setTime] = useState<number | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
@@ -178,7 +227,7 @@ export function CameraCard({ spec }: { spec: CameraSpec }) {
         <strong>{name}</strong>
         {mode === "live"
           ? <span className="camera-badge"><span className="camera-dot" aria-hidden="true" />{snapshotsOnly ? t.cards.camera.snapshot : t.cards.camera.live}</span>
-          : <span className="camera-badge">{t.cards.camera.playback(time ?? spec.at ?? "")}</span>}
+          : <span className="camera-badge">{t.cards.camera.playback(time !== null && info ? clock(time, info.timeZone, true) : spec.at ?? "")}</span>}
         {canSwitch && (
           <button type="button" className="camera-switch" onClick={() => { setError(null); setPlaying(false); setMode(mode === "live" ? "playback" : "live"); }}>
             {mode === "live" ? t.cards.camera.backToPlayback : t.cards.camera.watchLive}
@@ -194,7 +243,7 @@ export function CameraCard({ spec }: { spec: CameraSpec }) {
         ) : !info ? (
           <div className="camera-media camera-wait">{t.cards.camera.loading}</div>
         ) : mode === "playback" && spec.at ? (
-          <PlaybackVideo entity={spec.camera} at={spec.at} timeZone={info.timeZone} onClock={setTime} onError={fail} />
+          <PlaybackVideo entity={spec.camera} at={spec.at} onTime={setTime} onError={fail} />
         ) : playing ? (
           <LiveVideo entity={spec.camera} poster={api.cameraSnapshotUrl(spec.camera, shot)} onError={fail} />
         ) : (
@@ -217,6 +266,18 @@ export function CameraCard({ spec }: { spec: CameraSpec }) {
           </div>
         )}
       </div>
+      {mode === "playback" && info && time !== null && !error && (
+        <div className="camera-foot">
+          <button
+            type="button"
+            className="camera-switch"
+            title={t.cards.camera.saveHint(clock(time, info.timeZone, false))}
+            onClick={() => downloadFile(api.cameraClipUrl(spec.camera, time, SAVE_SECONDS), `${spec.camera.slice("camera.".length)}-${stamp(time, info.timeZone)}.mp4`)}
+          >
+            {t.cards.camera.save}
+          </button>
+        </div>
+      )}
       {(note || (mode === "live" && snapshotsOnly && !error)) && <p className="camera-note">{note ?? t.cards.camera.snapshotOnly}</p>}
     </section>
   );
