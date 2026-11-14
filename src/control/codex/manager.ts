@@ -26,6 +26,7 @@ import { TASK_KB_POLICY } from "../taskKb/gateway.js";
 import { IMAGE_POLICY } from "../imageTool.js";
 import { PRINTER_POLICY } from "../printer/gateway.js";
 import { TTS_POLICY } from "../ttsTool.js";
+import { OPS_POLICY } from "../opsTool.js";
 import { DEFAULT_CONVERSATION_TITLE, TITLE_UPDATED_EVENT } from "./conversationTitle.js";
 import { t } from "../i18n/index.js";
 import {
@@ -1334,7 +1335,7 @@ export class AgentManager {
   #threadSettings(conversation: ConversationRow): { developerInstructions: string; browserTask: BrowserTask | undefined } {
     const soul = readSoul(this.#cfg).content;
     const withTabs = this.#tabs ? withTabPolicy(soul) : soul;
-    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.taskKb ? TASK_KB_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.tts ? TTS_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.macNative ? PHONE_POLICY : "", this.#cfg.macNative && this.#tabs ? USER_BROWSER_POLICY : "", this.#cfg.macNative ? MAC_SHELL_POLICY : "", this.#cfg.ios ? IOS_POLICY : "", this.#cfg.env ? ENV_POLICY : ""].filter(Boolean);
+    const policies = [EXPERIENCE_POLICY, this.#cfg.decision ? DECISION_POLICY : "", this.#cfg.schedule ? SCHEDULE_POLICY : "", this.#cfg.taskKb ? TASK_KB_POLICY : "", this.#cfg.image ? IMAGE_POLICY : "", this.#cfg.tts ? TTS_POLICY : "", this.#cfg.kb ? KB_POLICY : "", this.#cfg.ha ? HA_POLICY : "", this.#cfg.printer ? PRINTER_POLICY : "", this.#cfg.ops ? OPS_POLICY : "", this.#cfg.macNative ? PHONE_POLICY : "", this.#cfg.macNative && this.#tabs ? USER_BROWSER_POLICY : "", this.#cfg.macNative ? MAC_SHELL_POLICY : "", this.#cfg.ios ? IOS_POLICY : "", this.#cfg.env ? ENV_POLICY : ""].filter(Boolean);
     const developerInstructions = policies.length ? [withTabs.trimEnd(), ...policies].join("\n\n").trim() : withTabs;
     // Every execution thread gets tab tools under its conversation's identity,
     // which stays the same across its turns, resumes and forks.

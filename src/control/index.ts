@@ -30,6 +30,7 @@ import {SharedKbMaintainer} from "./taskKb/sharedMaintainer.js";
 import { ImageGateway, sandboxImageFiles } from "./imageTool.js";
 import { PrinterGateway, sandboxPrintFiles } from "./printer/gateway.js";
 import { TtsGateway, sandboxSpeechFiles } from "./ttsTool.js";
+import { OpsGateway } from "./opsTool.js";
 import {UserRuntimes} from "./tenants.js";
 import { loadConfig, ensureDataDirs, type Config } from "./config.js";
 import { Logger } from "../common/logger.js";
@@ -563,6 +564,9 @@ async function main(): Promise<void> {
       return await ctx.push?.notify(id,{title:m.inkLow,body:m.inkLowBody(low.map(ink=>m.inkLevel(ink.name,ink.level)),threshold),tag:"printer-ink"},{force:true})??0;}}});
   printer.provision(ctx.cfg);
   printer.start();
+  // The statistics page's figures, for the owner's executors only.
+  const ops=ctx.analytics?new OpsGateway({cfg:ctx.cfg,db:ctx.db,analytics:ctx.analytics,log:ctx.log,port:ctx.cfg.memberModelPort??4902}):undefined;
+  ops?.provision(ctx.cfg);
   // Phones: each account's on the Mac it linked (the Mac app dials in).
   const deviceLinks=new DeviceLinks(ctx.db,ctx.cfg,ctx.log);
   ctx.deviceLinks=deviceLinks;
@@ -626,7 +630,7 @@ async function main(): Promise<void> {
       await runtime.browser.withCall("call",()=>undefined);
     }});
   browserGateway.provision(ctx.cfg);
-  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios,envs);
+  const modelGateway=new MemberModelGateway(ctx.cfg,ctx.log,ctx.share,decision,kb,schedule,ctx.hostTokens,image,browserGateway,ha,printer,macNative,tts,taskKb,ios,envs,ops);
   // Phone notifications: one key pair and one subscription store for every account.
   ctx.push=new PushService({db:ctx.db,log:ctx.log,keyFile:path.join(ctx.cfg.dataDir,"vapid.json"),subject:`https://${ctx.cfg.primaryHost}`,apns:loadApns(ctx.cfg.apns)});
   const ownerNotifications=startTaskNotifications(ctx,ctx.push);

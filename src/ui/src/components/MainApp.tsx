@@ -38,7 +38,7 @@ import { openDeviceBrowser } from "../deviceBrowser";
 import { syncDeviceToolsAccount } from "../deviceTools";
 import { attention } from "../attention";
 import { locale, localeChosen, localeSynced, markLocaleSynced, t } from "../i18n";
-import { track, trackOpen } from "../analytics";
+import { reportCampaign, track, trackOpen } from "../analytics";
 import { bootStep } from "../bootTiming";
 /** One owner-facing inbox; executor conversations are implementation details. */
 /** The site a link goes to, named on the opening card. */
@@ -130,6 +130,7 @@ export function MainApp({ firstSession }: { firstSession?: ReturnType<typeof api
     useEffect(() => {
         if (!auth) return;
         trackOpen(locale);
+        reportCampaign();
         const back = () => { if (document.visibilityState === "visible") trackOpen(locale); };
         document.addEventListener("visibilitychange", back);
         return () => document.removeEventListener("visibilitychange", back);

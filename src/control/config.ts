@@ -388,6 +388,8 @@ export function loadConfig(): {
   };
   /** This runtime's printer URL on the member gateway, when granted (PrinterGateway). */
   printer?: { url: string };
+  /** The owner runtime's operations-figures URL on the member gateway (OpsGateway); never a member's. */
+  ops?: { url: string };
   /**
    * The speech server every account's text to speech uses (ttsTool.ts): its
    * `POST /v1/tts` endpoint. Without a URL the feature is absent.

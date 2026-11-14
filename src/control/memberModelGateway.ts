@@ -21,6 +21,7 @@ import type {HostTokenSource} from './codex/hostTokens.js';
 import type {ImageGateway} from './imageTool.js';
 import type {PrinterGateway} from './printer/gateway.js';
 import type {TtsGateway} from './ttsTool.js';
+import type {OpsGateway} from './opsTool.js';
 import type {QuotaStatus} from '../common/usage.js';
 
 /** The CLI's subscription credential needs this beta on the Messages API. */
@@ -104,7 +105,7 @@ export class MemberModelGateway {
   private server:http.Server|null=null;
   /** Today's use of a member's daily tokens (src/control/quota.ts); once used up, nothing more reaches a model. */
   quota?:(userId:string)=>Promise<QuotaStatus|null>;
-  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway,private ios?:IosDeviceGateway,private envs?:EnvGateway){}
+  constructor(private cfg:Config,private log:Logger,private share?:ShareStore,private decision?:DecisionGateway,private kb?:KbGateway,private schedule?:ScheduleGateway,private hostTokens?:Pick<HostTokenSource,'getTokens'|'invalidate'>,private image?:ImageGateway,private browser?:BrowserGateway,private ha?:HaGateway,private printer?:PrinterGateway,private macNative?:MacNativeGateway,private tts?:TtsGateway,private taskKb?:TaskKbGateway,private ios?:IosDeviceGateway,private envs?:EnvGateway,private ops?:OpsGateway){}
   provision(cfg:Config):void {
     fs.mkdirSync(cfg.dataDir,{recursive:true,mode:0o700});
     const file=path.join(cfg.dataDir,'model-token');
@@ -168,6 +169,8 @@ export class MemberModelGateway {
       if(this.taskKb&&(req.url??'').startsWith('/task-kb/')){await this.taskKb.handle(req,res);return;}
       if(this.image&&(req.url??'').startsWith('/image/')){await this.image.handle(req,res);return;}
       if(this.tts&&(req.url??'').startsWith('/tts/')){await this.tts.handle(req,res);return;}
+      // The owner's alone: no member runtime is ever given a token for it.
+      if(this.ops&&(req.url??'').startsWith('/ops/')){await this.ops.handle(req,res);return;}
       if(this.browser&&(req.url??'').startsWith('/browser/')){await this.browser.handle(req,res);return;}
       const match=/^\/u\/(user_[a-zA-Z0-9]+)\/v1\/responses$/.exec(req.url??'');
       const messages=/^\/u\/(user_[a-zA-Z0-9]+)\/anthropic(\/v1\/messages(?:\/count_tokens)?)(\?beta=true)?$/.exec(req.url??'');

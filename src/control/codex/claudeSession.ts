@@ -19,6 +19,7 @@ import { taskKbMcpServers } from "../taskKb/gateway.js";
 import { imageMcpServers } from "../imageTool.js";
 import { printerMcpServers } from "../printer/gateway.js";
 import { ttsMcpServers } from "../ttsTool.js";
+import { opsMcpServers } from "../opsTool.js";
 import { JsonRpcResponseError } from "./jsonrpc.js";
 import { t } from "../i18n/index.js";
 
@@ -32,7 +33,7 @@ function notDelivered(): Error {
  * otherwise the legacy single-page endpoint the sandbox Codex is limited to.
  */
 function mcpConfig(browserTask: BrowserTask | undefined, cfg: Config): string {
-  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...scheduleMcpServers(cfg), ...taskKbMcpServers(cfg), ...imageMcpServers(cfg), ...ttsMcpServers(cfg), ...kbMcpServers(cfg), ...haMcpServers(cfg), ...printerMcpServers(cfg), ...macNativeMcpServers(cfg, browserTask), ...iosMcpServers(cfg), ...envMcpServers(cfg, browserTask) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
+  return JSON.stringify({ mcpServers: browserTask ? { ...tabMcpServers(browserTask), ...decisionMcpServers(cfg), ...scheduleMcpServers(cfg), ...taskKbMcpServers(cfg), ...imageMcpServers(cfg), ...ttsMcpServers(cfg), ...kbMcpServers(cfg), ...haMcpServers(cfg), ...printerMcpServers(cfg), ...opsMcpServers(cfg), ...macNativeMcpServers(cfg, browserTask), ...iosMcpServers(cfg), ...envMcpServers(cfg, browserTask) } : { aio_browser: { type: "http", url: "http://127.0.0.1:8080/mcp" } } });
 }
 
 /**

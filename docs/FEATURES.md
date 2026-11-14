@@ -21,6 +21,7 @@
 - [15. Claude Code 执行器](#15-claude-code-执行器)
 - [16. 运营看板](#16-运营看板)
 - [16a. 使用统计（埋点）](#16a-使用统计埋点)
+- [16a-1. 运营数据工具（仅 owner）](#16a-1-运营数据工具仅-owner)
 - [16b. 每日用量上限](#16b-每日用量上限)
 - [17. 界面与交互](#17-界面与交互)
 
@@ -1336,7 +1337,7 @@ token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控�
 ## 16a. 使用统计（埋点）
 
 自建、不接第三方统计。事件写入控制面中央数据库的 `analytics_events`（时间、事件名、账号 ID、平台、最多 8 个短标量属性），
-不记录消息内容、文件名、路径、网址、邮箱、IP 或设备标识（属性只有枚举值、计数与时长），启动时删除 400 天前的事件。成员运行时与 owner 共用这张表，上报不会唤醒成员沙箱。
+不记录消息内容、文件名、路径、网址、邮箱、IP 或设备标识（属性只有枚举值、计数与时长，以及下述推广链接的来源标识），启动时删除 400 天前的事件。成员运行时与 owner 共用这张表，上报不会唤醒成员沙箱。
 服务端看得到的动作一律在服务端记，界面只上报只发生在页面里的动作。
 
 - **平台与版本**：界面每个 API 请求带 `x-client-platform`（`web` / `pwa` / `ios` / `android` / `mac`，由 Mac App 的设备桥、手机 App 的浏览器桥和
@@ -1346,6 +1347,12 @@ token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控�
   `page_view`（切换页面，`view`）、`auth_view`（登录/注册页曝光，`mode`；唯一允许未登录上报的事件，需同源 Origin，每 IP 每小时 30 次）、
   `welcome_card`（主会话欢迎页点了哪张卡：`kind=feature` 时 `card` 为卡片图标名 `clawpages` / `knowledge` / `workspace`，`kind=starter` 时为第几个示例）、
   `file_save`（保存消息里的图表或 SVG 图，`what=chart|svg`）、`retry_tap`（浏览器状态栏的「重试」，`what=browser`）。已登录每账号每小时 300 次。
+- **来源（推广链接）**：浏览器第一次带着 `utm_source` 打开控制台时，界面把 `utm_source` / `utm_medium` / `utm_campaign` / `utm_content` 记在本机
+  （`localStorage`，保留 30 天，之后再点别的链接不覆盖，所以邮箱验证、Google / Apple 登录来回跳转后仍在），只接受字母、数字、`_`、`.`、`-` 组成的 64 字以内短标识，
+  其余丢弃。`auth_view` 带上它们（`source` / `medium` / `campaign` / `content`）；登录后界面上报一次 `attribution`（同样四个属性，不算活跃）。
+  报表的 `acquisition` 按链接分行：本期注册页浏览数，以及本期创建、且在创建后 24 小时内上报过该链接的账号数、其中有首个任务与首个完成任务的账号数；
+  四个字段全为 null 的一行是没有带链接的部分（直接输入网址、手机 App、无 utm 参数的链接）。已有账号后来点了推广链接不计入该链接。
+  `acquisitionStartedAt` 是第一次记到来源的时间；为 null 表示还没有任何来源数据（不是零）。运营看板页面暂不展示这张表，经下面的运营数据工具读取。
 - **服务端记录**：`signup`、`login`（方式、用邮箱还是用户名）、`login_failed`、`logout`、`task_submit`（附件数、其中图片数、是否引用任务）、`task_stop`、
   `task_archive`、`task_retry`、`schedule_edit`、`schedule_action`、`push_subscribe`/`push_unsubscribe`、`locale_change`、`vault_save`、
   `support_request`（`kind`；`content` 即举报回答）、`voice_input`（是否成功、时长）、`browser_takeover`/`browser_handback`/`browser_handback_continue`、
@@ -1369,6 +1376,18 @@ token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控�
   每日明细另有 `sessions` 与 `wau`（截至当天 7 天内活跃账号数）。
   任务数字在读报表时从各账号自己的任务表统计（只读打开，含历史，合并进其他任务的补充不单独计）；注册数来自账号创建时间；
   其余数字从事件开始记录（`meta.analytics_started`）之后才有。报表读取最近 max(2×范围, 30) 天的事件与任务，一次扫描算出全部数字。
+
+## 16a-1. 运营数据工具（仅 owner）
+
+owner 的执行器（Codex 与 Claude Code）经成员网关多一个 MCP 服务 `aio_ops`（`/ops/<令牌>/mcp`，`src/control/opsTool.ts`），只有一个工具
+`ops_report(days = 7 | 30 | 90，默认 7)`：返回运营看板同一份报表（`Analytics.report`）的汇总数字，外加 `registration`
+（账号总数、免邀请码注册上限 30、是否已需邀请码、未使用的邀请码个数）。用途是让「每周复盘获客」这类任务自己读注册漏斗、来源、激活与留存，不必等人打开看板或电脑在线。
+
+- **只给汇总数**：去掉报表里按账号列出的部分（`accounts`、`activeTodayAccounts`、`quality.restoreAccounts`）以及与运营无关的 `boot`、`welcomeCards`；
+  不含用户名、邮箱、账号 ID 或邀请码本身。
+- **只给 owner**：只有 owner 运行时拿到地址（令牌存 owner 数据目录的 `ops-token`，0600）；成员配置不继承、网关也不给成员发放，
+  成员的 Codex 白名单（`codexRequirementsToml`）里没有它。没有可配置的授权名单。
+- **它不知道的**：别的网站（如 clawpage.ai 官网）的访问量与链接点击、App Store / Google Play 的下载量。提示词要求执行器把「没有采集」与「零」分开说。
 
 ## 16b. 每日用量上限
 

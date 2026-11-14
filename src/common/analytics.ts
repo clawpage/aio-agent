@@ -7,10 +7,18 @@ export type Platform = (typeof PLATFORMS)[number];
 /**
  * Events the console reports: only what happens in the page and nowhere else
  * (the control plane records what it sees itself). `auth_view` is the only one
- * accepted without a session.
+ * accepted without a session. `attribution` is the campaign link the browser
+ * first arrived by (ATTRIBUTION_KEYS), reported once after signing in.
  */
-export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap", "boot_timing", "stale_build"] as const;
+export const CLIENT_EVENTS = ["app_open", "page_view", "auth_view", "welcome_card", "file_save", "retry_tap", "boot_timing", "stale_build", "attribution"] as const;
 export type ClientEvent = (typeof CLIENT_EVENTS)[number];
+
+/**
+ * Where a visitor came from: the `utm_source`, `utm_medium`, `utm_campaign` and `utm_content` of the link
+ * that first brought the browser here, as event properties without the prefix. Short identifiers only.
+ */
+export const ATTRIBUTION_KEYS = ["source", "medium", "campaign", "content"] as const;
+export const ATTRIBUTION_VALUE = /^[A-Za-z0-9_.-]{1,64}$/;
 
 /** Features the report counts adoption of, in the order the dashboard lists them. */
 export const FEATURES = [
@@ -94,6 +102,16 @@ export type BootTimes = Record<BootMetric, { p50: number | null; p90: number | n
 /** One platform's openings this period: how many, how many from the saved page, and how long each step took. */
 export type BootPlatform = { platform: string; opens: number; cached: number; times: BootTimes };
 
+/**
+ * One campaign link in the range: views of the register page that arrived by it, and the accounts created in
+ * the range that reported it within a day of signing up, down to their first task. The row whose fields are
+ * all null is everything that carried no campaign (typed address, apps, links without utm parameters).
+ */
+export type AcquisitionRow = {
+  source: string | null; medium: string | null; campaign: string | null; content: string | null;
+  registerViews: number; signups: number; firstTask: number; firstCompleted: number;
+};
+
 /** One account in the range: activity, tasks, where it used the console and the model of its latest task. */
 export type AccountRow = {
   id: string;
@@ -156,4 +174,8 @@ export type AnalyticsReport = {
   welcomeCards?: Array<{ card: string; count: number; users: number }>;
   /** Openings of the console this period, per platform, most first. */
   boot?: BootPlatform[];
+  /** Register-page views and sign-ups by campaign link, most sign-ups first. */
+  acquisition?: AcquisitionRow[];
+  /** When a campaign was first recorded; null while none ever was (then `acquisition` says nothing about sources, not zero). */
+  acquisitionStartedAt?: number | null;
 };

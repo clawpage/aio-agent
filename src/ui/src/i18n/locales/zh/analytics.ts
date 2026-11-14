@@ -132,7 +132,7 @@ export const analytics = {
   noEvents: "这个时间段还没有记录到事件。",
   eventColumns: { event: "事件", count: "次数", users: "账号数" },
   events: {
-    app_open: "打开应用", page_view: "浏览页面", auth_view: "登录/注册页曝光", signup: "注册", login: "登录", login_failed: "登录失败", logout: "退出登录",
+    app_open: "打开应用", page_view: "浏览页面", auth_view: "登录/注册页曝光", attribution: "上报来源链接", signup: "注册", login: "登录", login_failed: "登录失败", logout: "退出登录",
     task_submit: "提交消息", task_stop: "停止任务", task_archive: "归档任务", task_retry: "重试派单", schedule_edit: "编辑定时任务", schedule_action: "操作定时任务",
     push_subscribe: "开启通知", push_unsubscribe: "关闭通知", locale_change: "切换语言", vault_save: "保存密码", support_request: "支持与举报",
     voice_input: "语音输入", browser_takeover: "接管浏览器", browser_handback: "交还浏览器", user_browser_takeover: "接管本机浏览器", user_browser_handback: "交还本机浏览器",

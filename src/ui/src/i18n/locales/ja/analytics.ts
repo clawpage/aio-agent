@@ -132,7 +132,7 @@ export const analytics: typeof zh = {
   noEvents: "この期間に記録されたイベントはありません。",
   eventColumns: { event: "イベント", count: "回数", users: "アカウント" },
   events: {
-    app_open: "アプリを開く", page_view: "ページの表示", auth_view: "ログイン・登録ページの表示", signup: "新規登録", login: "ログイン", login_failed: "ログイン失敗", logout: "ログアウト",
+    app_open: "アプリを開く", page_view: "ページの表示", auth_view: "ログイン・登録ページの表示", attribution: "流入元リンクの報告", signup: "新規登録", login: "ログイン", login_failed: "ログイン失敗", logout: "ログアウト",
     task_submit: "メッセージの送信", task_stop: "タスクの停止", task_archive: "タスクのアーカイブ", task_retry: "振り分けの再試行", schedule_edit: "定期タスクの編集", schedule_action: "定期タスクの操作",
     push_subscribe: "通知をオン", push_unsubscribe: "通知をオフ", locale_change: "言語の変更", vault_save: "パスワードの保存", support_request: "サポート・報告",
     voice_input: "音声入力", browser_takeover: "ブラウザの引き継ぎ", browser_handback: "ブラウザの返却", user_browser_takeover: "AI Chrome の引き継ぎ", user_browser_handback: "AI Chrome の返却",

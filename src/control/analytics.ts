@@ -6,8 +6,8 @@ import type { Config } from "./config.js";
 import type { Logger } from "../common/logger.js";
 import { userNamespace } from "./auth/workspaceHost.js";
 import {
-  BOOT_METRICS, FEATURES, PLATFORMS,
-  type AccountRow, type BootMetric, type BootTimes, type ActiveAccount, type AnalyticsDay, type AnalyticsReport, type Cohort, type Feature, type FunnelEntry, type PeriodTotals, type Platform, type TaskQuality,
+  ATTRIBUTION_KEYS, ATTRIBUTION_VALUE, BOOT_METRICS, FEATURES, PLATFORMS,
+  type AccountRow, type AcquisitionRow, type BootMetric, type BootTimes, type ActiveAccount, type AnalyticsDay, type AnalyticsReport, type Cohort, type Feature, type FunnelEntry, type PeriodTotals, type Platform, type TaskQuality,
 } from "../common/analytics.js";
 
 /**
@@ -29,7 +29,7 @@ const MAX_STRING = 64;
 const GADGET_PREFIX = "gadget:";
 const FAILED = new Set(["failed", "planning_failed", "unknown"]);
 /** Events that are not the account using the product: someone visiting its page, its browser failing to come back. */
-const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed", "boot_timing", "stale_build"]);
+const PASSIVE = new Set(["clawpage_visit", "browser_restore_failed", "login_failed", "boot_timing", "stale_build", "attribution"]);
 /** Throttled events remembered at most this many keys (`trackOnce`). */
 const ONCE_KEYS = 5000;
 
@@ -100,6 +100,13 @@ const parse = (props: string | null): EventProps => {
   if (!props) return {};
   try { return JSON.parse(props) as EventProps; } catch { return {}; }
 };
+
+/** The campaign an event names (ATTRIBUTION_KEYS), as a row key; null without a well-formed source. */
+function campaignOf(p: EventProps): string | null {
+  if (typeof p.source !== "string" || !ATTRIBUTION_VALUE.test(p.source)) return null;
+  return JSON.stringify(ATTRIBUTION_KEYS.map(k => (typeof p[k] === "string" && ATTRIBUTION_VALUE.test(p[k] as string) ? p[k] : null)));
+}
+const NO_CAMPAIGN = JSON.stringify(ATTRIBUTION_KEYS.map(() => null));
 
 export class Analytics {
   #once = new Map<string, number>();
@@ -211,12 +218,27 @@ export class Analytics {
     // The funnel compares like with like: register-page views and the password sign-ups made from that page,
     // both recorded as events (account creation dates reach back before views were recorded).
     let registerViews = 0, loginViews = 0, formSignups = 0;
+    // By campaign link: register-page views in the range, and the first campaign each account reported.
+    const acquisition = new Map<string, AcquisitionRow>();
+    const campaignRow = (key: string) => {
+      let row = acquisition.get(key);
+      if (!row) {
+        const [source, medium, campaign, content] = JSON.parse(key) as Array<string | null>;
+        acquisition.set(key, row = { source: source ?? null, medium: medium ?? null, campaign: campaign ?? null, content: content ?? null, registerViews: 0, signups: 0, firstTask: 0, firstCompleted: 0 });
+      }
+      return row;
+    };
+    const arrivedBy = new Map<string, { ts: number; key: string }>();
     for (const row of this.db.prepare("SELECT ts,name,user_id,platform,props FROM analytics_events WHERE ts>=? AND ts<=?").iterate(since, now) as Iterable<{ ts: number; name: string; user_id: string | null; platform: string | null; props: string | null }>) {
       const date = dateAt(row.ts), props = parse(row.props), p = periodOf(date);
       // An executor's tool use is the agent at work (perhaps on a schedule), not the person.
       const passive = PASSIVE.has(row.name) || props.via === "agent";
       if (row.user_id && !passive) mark(date, row.user_id, row.ts, "event", row.platform);
       for (const f of featuresOf(row.name, props)) useFeature(f, date, row.user_id);
+      if (row.name === "attribution" && row.user_id) {
+        const key = campaignOf(props), first = arrivedBy.get(row.user_id);
+        if (key && (!first || row.ts < first.ts)) arrivedBy.set(row.user_id, { ts: row.ts, key });
+      }
       if (row.name === "app_open" && p) {
         period[p].sessions++;
         if (p === "current" && row.user_id) acc(row.user_id).sessions++;
@@ -230,7 +252,10 @@ export class Analytics {
       switch (row.name) {
         case "login": day.logins++; break;
         case "signup": if (props.method === "password") formSignups++; break;
-        case "auth_view": if (props.mode === "register") registerViews++; else if (props.mode === "login") loginViews++; break;
+        case "auth_view":
+          if (props.mode === "register") { registerViews++; campaignRow(campaignOf(props) ?? NO_CAMPAIGN).registerViews++; }
+          else if (props.mode === "login") loginViews++;
+          break;
         case "app_open": {
           day.sessions!++;
           if (typeof props.ui === "string" && row.user_id) {
@@ -341,6 +366,15 @@ export class Analytics {
       { step: "day1", count: signedUp.filter(u => eligible(dateAt(u.created_at), 1) && back(u.id, dateAt(u.created_at), 1, 1)).length, eligible: signedUp.filter(u => eligible(dateAt(u.created_at), 1)).length },
       { step: "day7", count: signedUp.filter(u => eligible(dateAt(u.created_at), 7) && back(u.id, dateAt(u.created_at), 1, 7)).length, eligible: signedUp.filter(u => eligible(dateAt(u.created_at), 7)).length },
     ];
+    // A campaign counts for an account only when its browser reported it within a day of the account being created.
+    for (const u of signedUp) {
+      const by = arrivedBy.get(u.id);
+      const row = campaignRow(by && by.ts >= u.created_at && by.ts - u.created_at <= DAY ? by.key : NO_CAMPAIGN);
+      row.signups++;
+      if (accs.get(u.id)?.firstTask != null) row.firstTask++;
+      if (accs.get(u.id)?.firstCompleted != null) row.firstCompleted++;
+    }
+    const campaignSince = this.db.prepare("SELECT MIN(ts) AS ts FROM analytics_events WHERE name IN ('auth_view','attribution') AND props LIKE '%\"source\":%'").get() as { ts: number | null };
     const weekOf = (date: string) => shift(date, -((new Date(`${date}T12:00:00Z`).getUTCDay() + 6) % 7));
     const cohortMap = new Map<string, Cohort>();
     for (const u of signedUp) {
@@ -385,6 +419,8 @@ export class Analytics {
         times: Object.fromEntries(BOOT_METRICS.map((m) => [m, { p50: quantile(b.times[m]), p90: quantile(b.times[m], 0.9) }])) as BootTimes })).sort((a, b) => b.opens - a.opens),
       accounts,
       versions: [...versions.values()].map(v => ({ platform: v.platform, version: v.version, users: v.users.size })).sort((a, b) => b.users - a.users || b.version.localeCompare(a.version)),
+      acquisition: [...acquisition.values()].sort((a, b) => b.signups - a.signups || b.registerViews - a.registerViews || String(a.source).localeCompare(String(b.source))),
+      acquisitionStartedAt: campaignSince.ts,
       welcomeCards: [...welcome].map(([card, w]) => ({ card, count: w.count, users: w.users.size })).sort((a, b) => b.count - a.count || a.card.localeCompare(b.card)),
     };
   }

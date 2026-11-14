@@ -132,7 +132,7 @@ export const analytics: typeof zh = {
   noEvents: "這段期間還沒有記錄到事件。",
   eventColumns: { event: "事件", count: "次數", users: "帳號數" },
   events: {
-    app_open: "開啟應用", page_view: "瀏覽頁面", auth_view: "登入/註冊頁曝光", signup: "註冊", login: "登入", login_failed: "登入失敗", logout: "登出",
+    app_open: "開啟應用", page_view: "瀏覽頁面", auth_view: "登入/註冊頁曝光", attribution: "回報來源連結", signup: "註冊", login: "登入", login_failed: "登入失敗", logout: "登出",
     task_submit: "送出訊息", task_stop: "停止任務", task_archive: "封存任務", task_retry: "重試派單", schedule_edit: "編輯排程任務", schedule_action: "操作排程任務",
     push_subscribe: "開啟通知", push_unsubscribe: "關閉通知", locale_change: "切換語言", vault_save: "儲存密碼", support_request: "支援與檢舉",
     voice_input: "語音輸入", browser_takeover: "接管瀏覽器", browser_handback: "交還瀏覽器", user_browser_takeover: "接管本機瀏覽器", user_browser_handback: "交還本機瀏覽器",

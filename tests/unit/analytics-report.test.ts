@@ -133,6 +133,34 @@ it('compares the range with the period before it and counts outcomes, durations,
   expect(JSON.stringify(report)).not.toMatch(/secret prompt|web:\d/);
 });
 
+it('counts register-page views and new accounts by the campaign link the browser first arrived by', () => {
+  const { cfg, analytics } = scenario();
+  // Nothing has named a campaign yet: sources are not collected, which is not the same as none.
+  expect(analytics.report(cfg, 30, now)).toMatchObject({ acquisitionStartedAt: null, acquisition: [{ source: null, registerViews: 2, signups: 4, firstTask: 1 }] });
+  const site = { source: 'clawpage.ai', medium: 'website', campaign: 'use_cases', content: 'homepage_en' };
+  const ev = (name: string, at: number, e: Parameters<Analytics['track']>[1] = {}) => analytics.track(name, e, at);
+  ev('auth_view', d(12) - 60_000, { props: { mode: 'register', ...site } });
+  ev('auth_view', d(12) - 30_000, { props: { mode: 'register', ...site } });
+  ev('auth_view', d(5), { props: { mode: 'login', ...site } });
+  // A source that is not a short identifier is not a campaign.
+  ev('auth_view', d(4), { props: { mode: 'register', source: 'see https://x.example/?q=1' } });
+  // user_a's browser reports the link an hour after the account was made; a later, different link changes nothing.
+  ev('attribution', d(12) + 3_600_000, { userId: 'user_a', props: site });
+  ev('attribution', d(12) + 7_200_000, { userId: 'user_a', props: { source: 'newsletter' } });
+  // An account that was already there for days did not come from the link it opened later; nor did the owner.
+  ev('attribution', d(10), { userId: 'user_d', props: site });
+  ev('attribution', d(0), { userId: 'owner_1', props: site });
+  const report = analytics.report(cfg, 30, now);
+  expect(report.acquisitionStartedAt).toBe(d(12) - 60_000);
+  expect(report.acquisition).toEqual([
+    { source: null, medium: null, campaign: null, content: null, registerViews: 3, signups: 3, firstTask: 0, firstCompleted: 0 },
+    { ...site, registerViews: 2, signups: 1, firstTask: 1, firstCompleted: 1 },
+  ]);
+  // Reporting a link is not the account using the product.
+  expect(report.accounts!.find(r => r.id === 'user_d')!.lastSeenAt).toBeNull();
+  expect(report.activation![0]).toEqual({ step: 'register_view', count: 5, eligible: null });
+});
+
 it('records a repetitive event once per window, and names tools and files without their content', () => {
   const root = open(':memory:');
   const analytics = new Analytics(root, undefined, now);

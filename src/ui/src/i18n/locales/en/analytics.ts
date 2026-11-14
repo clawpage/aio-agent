@@ -132,7 +132,7 @@ export const analytics: typeof zh = {
   noEvents: "No events recorded in this period.",
   eventColumns: { event: "Event", count: "Count", users: "Accounts" },
   events: {
-    app_open: "App opens", page_view: "Page views", auth_view: "Sign-in / sign-up page views", signup: "Sign-ups", login: "Sign-ins", login_failed: "Failed sign-ins", logout: "Sign-outs",
+    app_open: "App opens", page_view: "Page views", auth_view: "Sign-in / sign-up page views", attribution: "Campaign link reported", signup: "Sign-ups", login: "Sign-ins", login_failed: "Failed sign-ins", logout: "Sign-outs",
     task_submit: "Messages sent", task_stop: "Tasks stopped", task_archive: "Tasks archived", task_retry: "Dispatch retries", schedule_edit: "Schedules edited", schedule_action: "Schedule actions",
     push_subscribe: "Notifications on", push_unsubscribe: "Notifications off", locale_change: "Language changes", vault_save: "Passwords saved", support_request: "Support and reports",
     voice_input: "Voice input", browser_takeover: "Browser takeovers", browser_handback: "Browser hand-backs", user_browser_takeover: "AI Chrome takeovers", user_browser_handback: "AI Chrome hand-backs",

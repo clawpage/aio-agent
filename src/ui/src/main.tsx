@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ClawpageSignIn } from "./components/ClawpageSignIn";
 import { locale, t } from "./i18n";
+import { captureCampaign } from "./analytics";
 import "./theme.css";
 import "./styles.css";
 
@@ -66,6 +67,7 @@ else addEventListener("load", checkStyles);
 
 const container = document.getElementById("root");
 if (!container) throw new Error("#root not found");
+captureCampaign();
 createRoot(container).render(
   <StrictMode>
     {/* Signing in to a clawpage stands apart from the console: no account address, no task inbox. */}

@@ -3,7 +3,7 @@ import { api, ApiError } from "../api";
 import { BrandMark, PageLoading } from "./Brand";
 import { t } from "../i18n";
 import { hasAppleSignIn, hasNativeBrowser, listenGoogleReturn, openDeviceBrowser, openNativeBrowser, signInWithApple } from "../deviceBrowser";
-import { track } from "../analytics";
+import { campaignProps, track } from "../analytics";
 
 export function AuthIcon({name, size}: {name: "check" | "arrow" | "mail"; size: number}) {
   const paths = {check: "M5 12l4 4L19 6", arrow: "M5 12h14m-6-6 6 6-6 6", mail: "M4 5h16v14H4Z M4 6l8 7 8-7"};
@@ -222,7 +222,7 @@ export function Login({ onSuccess, notice, username: named }: { onSuccess: () =>
       setSendingCode(false);
     }
   };
-  useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode }); }, [mode, checking, pendingEmail]);
+  useEffect(() => { if (!checking && !pendingEmail) track("auth_view", { mode, ...campaignProps() }); }, [mode, checking, pendingEmail]);
   useRevealTypedBox();
   const switchMode = (next: Mode) => {
     setMode(next);
