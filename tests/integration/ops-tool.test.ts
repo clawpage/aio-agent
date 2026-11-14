@@ -1,4 +1,5 @@
 import { it, expect } from "vitest";
+import http from "node:http";
 import path from "node:path";
 import { startHarness } from "../helpers/harness.js";
 import { MemberModelGateway } from "../../src/control/memberModelGateway.js";
@@ -11,7 +12,17 @@ it("gives the owner's executors the deployment's figures as counts, and no membe
   const h = await startHarness();
   const cfg = { ...h.ctx.cfg, memberModelPort: 0 };
   const analytics = h.ctx.analytics ?? new Analytics(h.ctx.db);
-  const ops = new OpsGateway({ cfg, db: h.ctx.db, analytics, log: h.ctx.log, port: 0 });
+  // The public website's counts: answered only to the token, as the site does.
+  const asked: string[] = [];
+  let siteDown = false;
+  const site = http.createServer((req, res) => {
+    asked.push(`${req.url} ${req.headers.authorization}`);
+    if (siteDown || req.headers.authorization !== "Bearer site-token-private") return void res.writeHead(404).end();
+    res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ days: 7, views: [{ page: "home", language: "en", count: 4 }], clicks: [{ to: "register", count: 2 }], daily: [{ date: "2026-11-14", views: 4, clicks: 2 }], extra: "dropped" }));
+  });
+  await new Promise<void>((resolve) => site.listen(0, "127.0.0.1", resolve));
+  const website = { url: `http://127.0.0.1:${(site.address() as { port: number }).port}/api/site/stats`, token: "site-token-private" };
+  const ops = new OpsGateway({ cfg, db: h.ctx.db, analytics, log: h.ctx.log, port: 0, website });
   const gateway = new MemberModelGateway(cfg, h.ctx.log, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, ops);
   await gateway.start();
   try {
@@ -47,9 +58,9 @@ it("gives the owner's executors the deployment's figures as counts, and no membe
     const account = (id: string, name: string) => h.ctx.db.prepare("INSERT INTO owners (id,username,role,password_hash,password_salt,password_params,created_at) VALUES (?,?,'member','h','s','{}',?)").run(id, name, now - 60_000);
     account("user_secret1", "alice-private-name");
     account("user_secret2", "bob-private-name");
-    const site = { source: "clawpage.ai", medium: "website", campaign: "use_cases" };
-    analytics.track("auth_view", { props: { mode: "register", ...site } }, now - 120_000);
-    analytics.track("attribution", { userId: "user_secret1", props: site }, now - 30_000);
+    const campaign = { source: "clawpage.ai", medium: "website", campaign: "use_cases" };
+    analytics.track("auth_view", { props: { mode: "register", ...campaign } }, now - 120_000);
+    analytics.track("attribution", { userId: "user_secret1", props: campaign }, now - 30_000);
     analytics.track("app_open", { userId: "user_secret1", platform: "web", props: { ui: "1.0.0" } }, now - 20_000);
     analytics.track("browser_restore_failed", { userId: "user_secret1", props: { reason: "deadline" } }, now - 10_000);
     h.ctx.db.prepare("INSERT INTO invites (code,note,created_at) VALUES ('invite-code-private','for carol',?)").run(now);
@@ -61,7 +72,7 @@ it("gives the owner's executors the deployment's figures as counts, and no membe
     expect(report.days).toBe(7);
     expect(report.totals.accounts).toBeGreaterThanOrEqual(3);
     expect(report.totals.activeToday).toBe(1);
-    expect(report.acquisition).toContainEqual({ ...site, content: null, registerViews: 1, signups: 1, firstTask: 0, firstCompleted: 0 });
+    expect(report.acquisition).toContainEqual({ ...campaign, content: null, registerViews: 1, signups: 1, firstTask: 0, firstCompleted: 0 });
     expect(report.quality).toMatchObject({ restoreFailures: 1, restoreReasons: { deadline: 1 } });
     expect(report.registration).toEqual({ accounts: report.totals.accounts, openLimit: 30, inviteRequired: false, unusedInvites: 1 });
     // Counts only: nothing that names an account, and no invite code.
@@ -69,13 +80,23 @@ it("gives the owner's executors the deployment's figures as counts, and no membe
     expect(report.quality).not.toHaveProperty("restoreAccounts");
     expect(answer.content[0]!.text).not.toMatch(/private|user_secret|carol/);
 
+    // The website's figures ride along, read with the token, which never reaches the executor.
+    expect(report.website).toEqual({ views: [{ page: "home", language: "en", count: 4 }], clicks: [{ to: "register", count: 2 }], daily: [{ date: "2026-11-14", views: 4, clicks: 2 }] });
+    expect(asked).toEqual(["/api/site/stats?days=7 Bearer site-token-private"]);
+    expect(answer.content[0]!.text).not.toContain("site-token");
+    expect(memberConfig({ ...owner, siteStats: website }, "user_n", 18094).siteStats).toBeUndefined();
+
     expect(JSON.parse((await call({ days: 30 })).content[0]!.text).days).toBe(30);
+    // A website that cannot be read is said so, not shown as zero.
+    siteDown = true;
+    expect(JSON.parse((await call({})).content[0]!.text).website).toEqual({ error: "unavailable" });
     const bad = await call({ days: 5 });
     expect(bad.isError).toBe(true);
     expect(bad.content[0]!.text).toContain("7, 30 or 90");
     const unknown = await (await rpc(owner.ops!.url, { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "accounts_list", arguments: {} } })).json();
     expect(unknown.error.code).toBe(-32602);
   } finally {
+    site.close();
     gateway.close();
     await h.shutdown();
   }

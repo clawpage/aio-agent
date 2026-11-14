@@ -124,6 +124,7 @@
 | `PA_KB_MCP_URL` | 空 | 宿主上知识库 MCP 服务地址；为空则不提供 |
 | `PA_KB_MCP_SECRETS_FILE` | `~/.config/aio-agent/kb-mcp.env` | `KB_MCP_TOKEN`（环境变量优先） |
 | `PA_KB_MCP_MEMBERS` | 空 | 获准使用知识库的成员，逗号分隔；owner 始终可用 |
+| `PA_SITE_STATS_URL` / `PA_SITE_STATS_TOKEN` | 空 | 官网的访问与点击统计接口（如 `https://clawpage.ai/api/site/stats`）及其令牌；两者都有时，owner 的运营数据工具附带官网数据。令牌只留在控制面 |
 | `PA_HA_MCP_URL` | 空 | Home Assistant MCP Server 地址；为空则不提供 |
 | `PA_HA_MCP_SECRETS_FILE` | `~/.config/aio-agent/ha-mcp.env` | `HA_MCP_TOKEN`（HA 长期访问令牌，环境变量优先） |
 | `PA_HA_MCP_ACCOUNTS` | 空 | 获准操作 Home Assistant 的用户名（owner 也需列出） |

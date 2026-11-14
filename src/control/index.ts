@@ -565,7 +565,7 @@ async function main(): Promise<void> {
   printer.provision(ctx.cfg);
   printer.start();
   // The statistics page's figures, for the owner's executors only.
-  const ops=ctx.analytics?new OpsGateway({cfg:ctx.cfg,db:ctx.db,analytics:ctx.analytics,log:ctx.log,port:ctx.cfg.memberModelPort??4902}):undefined;
+  const ops=ctx.analytics?new OpsGateway({cfg:ctx.cfg,db:ctx.db,analytics:ctx.analytics,log:ctx.log,port:ctx.cfg.memberModelPort??4902,website:ctx.cfg.siteStats}):undefined;
   ops?.provision(ctx.cfg);
   // Phones: each account's on the Mac it linked (the Mac app dials in).
   const deviceLinks=new DeviceLinks(ctx.db,ctx.cfg,ctx.log);

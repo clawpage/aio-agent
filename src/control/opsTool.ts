@@ -28,7 +28,9 @@ const TOOL = {
     "acquisition (per campaign link, i.e. the utm_source / utm_medium / utm_campaign / utm_content of the link a browser first arrived by: register-page views, accounts created, and how many of those ran and completed a first task; the row whose fields are all null is everything without a campaign link, including the phone apps), " +
     "funnel (register-page and sign-in-page views against password sign-ups), features, quality, platforms, versions, events, and registration (accounts against the limit for signing up without an invite code). " +
     "Days before collectionStartedAt have account and task figures only. When acquisitionStartedAt is null no campaign has been recorded yet: report sources as not yet collected, not as zero. " +
-    "It does not know visits to other sites, clicks on their links, or app store downloads.",
+    "website is the public website's own figures for the same days: views per page and language, clicks on its links to the registration page (register), the app, App Store, Google Play and the APK download, and a daily series (UTC); " +
+    "a click on a store link is not a download, and days before the website began counting read zero because nothing was counted. website is null when no website is connected, and {error} when it could not be read: report those as not available, not as zero. " +
+    "It does not know app store downloads or visits to any other site.",
   inputSchema: {
     type: "object",
     properties: { days: { type: "integer", enum: RANGES, description: "The range in days (default 7)" } },
@@ -56,6 +58,9 @@ export function aggregateReport(report: AnalyticsReport): Omit<AnalyticsReport, 
   return { ...rest, quality: counts };
 }
 
+/** Where the public website's view and click counts are read (its GET /api/site/stats) and the token for it. */
+export type WebsiteStats = { url: string; token: string };
+
 export class OpsGateway {
   #db: Db;
   #analytics: Analytics;
@@ -64,7 +69,10 @@ export class OpsGateway {
   #port: number;
   #tokens = new Set<string>();
 
-  constructor(opts: { cfg: Config; db: Db; analytics: Analytics; log: Logger; port: number }) {
+  #website: WebsiteStats | undefined;
+
+  constructor(opts: { cfg: Config; db: Db; analytics: Analytics; log: Logger; port: number; website?: WebsiteStats | undefined }) {
+    this.#website = opts.website;
     this.#cfg = opts.cfg;
     this.#db = opts.db;
     this.#analytics = opts.analytics;
@@ -113,14 +121,14 @@ export class OpsGateway {
     const headers: Record<string, string> = {};
     if (!Array.isArray(body) && (body as { method?: string })?.method === "initialize") headers["mcp-session-id"] = randomUUID();
     if (Array.isArray(body)) {
-      const out = body.map((m) => this.#rpc(m)).filter(Boolean);
+      const out = (await Promise.all(body.map((m) => this.#rpc(m)))).filter(Boolean);
       return out.length ? send(200, out, headers) : send(202, undefined, headers);
     }
-    const out = this.#rpc(body);
+    const out = await this.#rpc(body);
     return out ? send(200, out, headers) : send(202, undefined, headers);
   }
 
-  #rpc(message: unknown): unknown {
+  async #rpc(message: unknown): Promise<unknown> {
     const { method, id, params } = (message ?? {}) as { method?: string; id?: unknown; params?: Record<string, unknown> };
     if (id === undefined || id === null) return null; // a notification
     const reply = (result: unknown) => ({ jsonrpc: "2.0", id, result });
@@ -138,23 +146,37 @@ export class OpsGateway {
         return reply({ tools: [TOOL] });
       case "tools/call":
         if (params?.name !== TOOL.name) return { jsonrpc: "2.0", id, error: { code: -32602, message: `unknown tool ${String(params?.name)}` } };
-        return reply(this.#report((params?.arguments ?? {}) as Record<string, unknown>));
+        return reply(await this.#report((params?.arguments ?? {}) as Record<string, unknown>));
       default:
         return { jsonrpc: "2.0", id, error: { code: -32601, message: `unknown method ${String(method)}` } };
     }
   }
 
-  #report(args: Record<string, unknown>): unknown {
+  async #report(args: Record<string, unknown>): Promise<unknown> {
     const text = (value: unknown, isError = false) => ({ content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }], ...(isError ? { isError: true } : {}) });
     const days = args.days === undefined || args.days === null ? 7 : Number(args.days);
     if (!RANGES.includes(days)) return text("days must be 7, 30 or 90", true);
     try {
       const report = aggregateReport(this.#analytics.report(this.#cfg, days));
       const accounts = report.totals.accounts;
-      return text({ ...report, registration: { accounts, openLimit: OPEN_REGISTRATION_LIMIT, inviteRequired: accounts >= OPEN_REGISTRATION_LIMIT, unusedInvites: this.#unusedInvites() } });
+      return text({ ...report, registration: { accounts, openLimit: OPEN_REGISTRATION_LIMIT, inviteRequired: accounts >= OPEN_REGISTRATION_LIMIT, unusedInvites: this.#unusedInvites() }, website: await this.#websiteStats(days) });
     } catch (err) {
       this.#log.warn("operations report failed", { error: err instanceof Error ? err.message : String(err) });
       return text("The operations figures could not be read right now", true);
+    }
+  }
+
+  /** The website's counts as it reports them: only numbers, pages and link names. */
+  async #websiteStats(days: number): Promise<unknown> {
+    if (!this.#website) return null;
+    try {
+      const res = await fetch(`${this.#website.url}?days=${days}`, { headers: { authorization: `Bearer ${this.#website.token}` }, signal: AbortSignal.timeout(10_000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const { views, clicks, daily } = (await res.json()) as Record<string, unknown>;
+      return { views, clicks, daily };
+    } catch (err) {
+      this.#log.warn("website figures failed", { error: err instanceof Error ? err.message : String(err) });
+      return { error: "unavailable" };
     }
   }
 

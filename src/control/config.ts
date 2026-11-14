@@ -390,6 +390,8 @@ export function loadConfig(): {
   printer?: { url: string };
   /** The owner runtime's operations-figures URL on the member gateway (OpsGateway); never a member's. */
   ops?: { url: string };
+  /** The public website's own counts (its GET /api/site/stats) for the operations figures; absent without both a URL and a token. */
+  siteStats?: { url: string; token: string } | undefined;
   /**
    * The speech server every account's text to speech uses (ttsTool.ts): its
    * `POST /v1/tts` endpoint. Without a URL the feature is absent.
@@ -698,6 +700,7 @@ export function loadConfig(): {
       secretsFile: envStr("PA_KB_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "kb-mcp.env")),
       members: parseList(envStr("PA_KB_MCP_MEMBERS", "")),
     },
+    siteStats: envStr("PA_SITE_STATS_URL", "") && envStr("PA_SITE_STATS_TOKEN", "") ? { url: envStr("PA_SITE_STATS_URL", ""), token: envStr("PA_SITE_STATS_TOKEN", "") } : undefined,
     haMcp: {
       upstreamUrl: envStr("PA_HA_MCP_URL", ""),
       secretsFile: envStr("PA_HA_MCP_SECRETS_FILE", path.join(os.homedir(), ".config", "aio-agent", "ha-mcp.env")),

@@ -46,7 +46,7 @@ export function memberConfig(base: Config, userId: string, port: number, model: 
     // Nor its printer address: the gateway grants a listed account its own.
     printer:undefined,
     // Nor the deployment's operations figures: they are the owner's alone.
-    ops:undefined,
+    ops:undefined,siteStats:undefined,
     // Nor the owner's Mac (its phone, Chrome and terminal): the gateway gives an account that linked a Mac its own.
     macNative:undefined,
     // Nor the owner's iPhone: the gateway gives an account that linked an iPhone its own.

@@ -1387,7 +1387,10 @@ owner 的执行器（Codex 与 Claude Code）经成员网关多一个 MCP 服务
   不含用户名、邮箱、账号 ID 或邀请码本身。
 - **只给 owner**：只有 owner 运行时拿到地址（令牌存 owner 数据目录的 `ops-token`，0600）；成员配置不继承、网关也不给成员发放，
   成员的 Codex 白名单（`codexRequirementsToml`）里没有它。没有可配置的授权名单。
-- **它不知道的**：别的网站（如 clawpage.ai 官网）的访问量与链接点击、App Store / Google Play 的下载量。提示词要求执行器把「没有采集」与「零」分开说。
+- **官网数据**：配置了 `PA_SITE_STATS_URL` 与 `PA_SITE_STATS_TOKEN` 时，每次调用由控制面带令牌读一次官网自己的统计接口，放在 `website` 里：
+  按页面与语言的访问数、通往注册页 / 一站 / App Store / Google Play / APK 的链接点击数、按 UTC 日的序列。令牌只在控制面，不进沙箱；
+  未配置为 `null`，读取失败为 `{error}`，都不是零。官网点击注册后到达注册页的人数在 `acquisition` 里（来源 `clawpage.ai`），两边合起来就是「访问 → 注册点击 → 到达注册页 → 注册成功 → 首个任务」。
+- **它不知道的**：App Store / Google Play 的下载量（商店链接的点击不等于下载）、其他网站的访问。提示词要求执行器把「没有采集」与「零」分开说。
 
 ## 16b. 每日用量上限
 
