@@ -7,7 +7,7 @@ import type { Db } from "./db.js";
 import type { Logger } from "../common/logger.js";
 import type { Analytics } from "./analytics.js";
 import type { AnalyticsReport } from "../common/analytics.js";
-import { OPEN_REGISTRATION_LIMIT } from "./auth/invites.js";
+import { OPEN_REGISTRATION_LIMIT, activeAccounts } from "./auth/invites.js";
 
 /**
  * The operations tool: the figures of the owner's statistics page (Analytics.report),
@@ -26,7 +26,7 @@ const TOOL = {
     "totals (accounts, sign-ups, active today / 7 days / 30 days, tasks and how they ended), current against previous (the same number of days just before), daily (one row per date), " +
     "activation (register-page views -> accounts created -> first task -> first completed task -> back the next day -> back within 7 days; eligible is how many were old enough to count), cohorts (by sign-up week), " +
     "acquisition (per campaign link, i.e. the utm_source / utm_medium / utm_campaign / utm_content of the link a browser first arrived by: register-page views, accounts created, and how many of those ran and completed a first task; the row whose fields are all null is everything without a campaign link, including the phone apps), " +
-    "funnel (register-page and sign-in-page views against password sign-ups), features, quality, platforms, versions, events, and registration (accounts against the limit for signing up without an invite code). " +
+    "funnel (register-page and sign-in-page views against password sign-ups), features, quality, platforms, versions, events, and registration (accounts active in the last 30 days against the limit for signing up without an invite code). " +
     "Days before collectionStartedAt have account and task figures only. When acquisitionStartedAt is null no campaign has been recorded yet: report sources as not yet collected, not as zero. " +
     "website is the public website's own figures for the same days: views per page and language, clicks on its links to the registration page (register), the app, App Store, Google Play and the APK download, and a daily series (UTC); " +
     "a click on a store link is not a download, and days before the website began counting read zero because nothing was counted. website is null when no website is connected, and {error} when it could not be read: report those as not available, not as zero. " +
@@ -158,8 +158,8 @@ export class OpsGateway {
     if (!RANGES.includes(days)) return text("days must be 7, 30 or 90", true);
     try {
       const report = aggregateReport(this.#analytics.report(this.#cfg, days));
-      const accounts = report.totals.accounts;
-      return text({ ...report, registration: { accounts, openLimit: OPEN_REGISTRATION_LIMIT, inviteRequired: accounts >= OPEN_REGISTRATION_LIMIT, unusedInvites: this.#unusedInvites() }, website: await this.#websiteStats(days) });
+      const active = activeAccounts(this.#db);
+      return text({ ...report, registration: { accounts: report.totals.accounts, activeAccounts: active, openLimit: OPEN_REGISTRATION_LIMIT, inviteRequired: active >= OPEN_REGISTRATION_LIMIT, unusedInvites: this.#unusedInvites() }, website: await this.#websiteStats(days) });
     } catch (err) {
       this.#log.warn("operations report failed", { error: err instanceof Error ? err.message : String(err) });
       return text("The operations figures could not be read right now", true);

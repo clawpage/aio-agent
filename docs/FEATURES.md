@@ -319,7 +319,7 @@ owner 在配置「用户支持」下的「回复反馈」看最近 200 条（账
   - 错误：缺码 `email_code_required`、码错 `email_code_invalid`、过期 `email_code_expired`、次数用完 `email_code_attempts`，文案五种语言。
   - 没配 key（自托管默认）时照旧不要验证码，`/api/auth/session` 的 `emailCode: false` 让注册页不显示这一步，`/api/auth/register/code` 返回 404，控制面启动时日志警告一次。
 - **注册**：登录页切换到注册（或打开 `/register`），填邮箱和密码（至少 12 位）；也可用 Google 首次认证，直接以 Google 邮箱为账号邮箱
-  （该邮箱已被密码账号注册时拒绝，不自动关联）。现有账户总数不足 30 时免邀请码，达到 30 后必须填写邀请码；owner、管理员创建的成员与审核账户均计入总数。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
+  （该邮箱已被密码账号注册时拒绝，不自动关联）。近 30 天活跃账户不足 30 个时免邀请码，达到 30 个后必须填写邀请码（`activeAccounts`，`src/control/auth/invites.ts`）。活跃 = 近 30 天（滚动 30×24 小时）内注册，或有本人使用产品的事件（与运营报表同一口径：不含执行器自己的工具使用、定时任务、他人访问分享页等被动事件）；owner、管理员创建的成员与审核账户同样按是否活跃计入，30 天没人用的账户让出名额。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。
   邀请码由 owner 在配置页生成，格式 `XXXX-XXXX-XXXX`，一次有效，可手动作废；领用与建号在同一事务中。注册结果是普通 member。
 - **通过 Apple 登录**（iOS App，App Store 准则 4.8）：登录页在 Google 按钮之上显示同样大小的「通过 Apple 登录」，只在带 `aioAppleSignIn` 桥接的 iOS 壳里出现（网页、Android 与旧版 App 不显示）。
   页面先 `POST /api/auth/apple/start` 取一次性 nonce（流程绑定 `pa_apple_client` cookie，10 分钟），壳用系统 `ASAuthorizationController`（只要邮箱）带上 nonce 请求，
@@ -1381,7 +1381,7 @@ token 统计时区取 `PA_BROWSER_TIMEZONE`。计数持久保存在各账号控�
 
 owner 的执行器（Codex 与 Claude Code）经成员网关多一个 MCP 服务 `aio_ops`（`/ops/<令牌>/mcp`，`src/control/opsTool.ts`），只有一个工具
 `ops_report(days = 7 | 30 | 90，默认 7)`：返回运营看板同一份报表（`Analytics.report`）的汇总数字，外加 `registration`
-（账号总数、免邀请码注册上限 30、是否已需邀请码、未使用的邀请码个数）。用途是让「每周复盘获客」这类任务自己读注册漏斗、来源、激活与留存，不必等人打开看板或电脑在线。
+（账号总数、近 30 天活跃账号数 `activeAccounts`、免邀请码注册上限 30、是否已需邀请码、未使用的邀请码个数）。用途是让「每周复盘获客」这类任务自己读注册漏斗、来源、激活与留存，不必等人打开看板或电脑在线。
 
 - **只给汇总数**：去掉报表里按账号列出的部分（`accounts`、`activeTodayAccounts`、`quality.restoreAccounts`）以及与运营无关的 `boot`、`welcomeCards`；
   不含用户名、邮箱、账号 ID 或邀请码本身。

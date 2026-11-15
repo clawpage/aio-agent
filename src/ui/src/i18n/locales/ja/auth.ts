@@ -6,7 +6,7 @@ export const auth: typeof zh = {
   brand: 'Clawpage Agent',
   heading: { login: 'Clawpage Agent におまかせ', register: 'Clawpage Agent をはじめよう', invite: 'あとは招待コードだけ' },
   passwordAlternative: 'またはメールアドレスとパスワードで',
-  intro: { openRegistration: '先着 30 アカウントまでは招待コードなしで新規登録できます。枠が埋まった後は招待コードが必要です。',
+  intro: { openRegistration: '現在は招待コードなしで新規登録できます。直近 30 日間にアクティブなアカウントが 30 に達すると招待コードが必要になります。',
     login: 'ログインして、AI アシスタントとの作業を続けましょう。',
     register: 'アカウントを作成して、AI アシスタントに仕事を任せましょう。',
   },

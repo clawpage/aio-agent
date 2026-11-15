@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { startHarness, login, type TestHarness } from "../helpers/harness.js";
 import { createMember } from "../../src/control/auth/owner.js";
-import { OPEN_REGISTRATION_LIMIT } from "../../src/control/auth/invites.js";
+import { ACTIVE_WINDOW_MS, OPEN_REGISTRATION_LIMIT, activeAccounts, registrationRequiresInvite } from "../../src/control/auth/invites.js";
 
 let h: TestHarness;
 let owner: Record<string, string>;
@@ -122,14 +122,14 @@ it("rejects cross-site registration", async () => {
   expect(res.status).toBe(403);
 });
 
-it("registers without an invite while fewer than 30 accounts exist", async () => {
+it("registers without an invite while fewer than 30 accounts are active", async () => {
   expect(await (await h.request("/api/auth/session")).json()).toMatchObject({ registrationRequiresInvite: false });
   const res = await register({ email: "open-member@example.com", password: "open-password-123" });
   expect(res.status).toBe(200);
   expect(await res.json()).toMatchObject({ role: "member", username: "open-member", email: "open-member@example.com" });
 });
 
-it("counts all existing accounts and requires a valid invite at 30", async () => {
+it("counts every recently registered account and requires a valid invite at 30", async () => {
   const count = () => (h.ctx.db.prepare("SELECT COUNT(*) AS n FROM owners").get() as {n: number}).n;
   while (count() < OPEN_REGISTRATION_LIMIT) {
     const n = count();
@@ -142,4 +142,33 @@ it("counts all existing accounts and requires a valid invite at 30", async () =>
   expect(count()).toBe(OPEN_REGISTRATION_LIMIT);
   expect((await register({ email: "needs-invite@example.com", password: "open-password-123", inviteCode: await issue() })).status).toBe(200);
   expect(count()).toBe(OPEN_REGISTRATION_LIMIT + 1);
+});
+
+it("counts only the accounts active in the last 30 days toward the limit", () => {
+  const db = h.ctx.db, now = Date.now(), old = now - ACTIVE_WINDOW_MS - 1000;
+  // Everyone so far registered long ago and has not been back.
+  db.prepare("UPDATE owners SET created_at=?").run(old);
+  db.prepare("DELETE FROM analytics_events").run();
+  expect(activeAccounts(db, now)).toBe(0);
+  expect(registrationRequiresInvite(db, now)).toBe(false);
+
+  const ids = (db.prepare("SELECT id FROM owners ORDER BY id").all() as Array<{ id: string }>).map(r => r.id);
+  expect(ids.length).toBeGreaterThan(OPEN_REGISTRATION_LIMIT);
+  const event = (userId: string, name: string, ts: number, props: unknown = null) =>
+    db.prepare("INSERT INTO analytics_events(ts,name,user_id,platform,props) VALUES(?,?,?,?,?)").run(ts, name, userId, "web", props ? JSON.stringify(props) : null);
+  // Not the person: use before the window, a visitor on their shared page, the agent's own tool use.
+  event(ids[0]!, "app_open", old);
+  event(ids[0]!, "clawpage_visit", now);
+  event(ids[0]!, "kb_search", now, { via: "agent" });
+  expect(activeAccounts(db, now)).toBe(0);
+  // The person: opening the app, however often.
+  event(ids[0]!, "app_open", now); event(ids[0]!, "page_view", now, { view: "tasks" });
+  expect(activeAccounts(db, now)).toBe(1);
+  for (const id of ids.slice(1, OPEN_REGISTRATION_LIMIT - 1)) event(id, "app_open", now - ACTIVE_WINDOW_MS + 60_000);
+  expect(activeAccounts(db, now)).toBe(OPEN_REGISTRATION_LIMIT - 1);
+  expect(registrationRequiresInvite(db, now)).toBe(false);
+  event(ids[OPEN_REGISTRATION_LIMIT - 1]!, "login", now);
+  expect(registrationRequiresInvite(db, now)).toBe(true);
+  // A month later nobody has been back: the places are free again.
+  expect(registrationRequiresInvite(db, now + ACTIVE_WINDOW_MS + 60_000)).toBe(false);
 });

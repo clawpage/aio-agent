@@ -3,7 +3,7 @@ export const auth: typeof zh = {
   sessionExpired: 'Tu sesión ha caducado. Inicia sesión de nuevo.', restoring: 'Restaurando tu sesión…', brand: 'Clawpage Agent',
   heading: { login: 'Déjaselo a Clawpage Agent', register: 'Conoce a tu Clawpage Agent', invite: 'Solo falta una invitación' },
   passwordAlternative: 'o usa tu correo y contraseña',
-  intro: { openRegistration: "Las primeras 30 cuentas pueden registrarse sin invitación. Después se requiere un código de invitación.", login: 'Inicia sesión y retoma el trabajo con tu asistente de IA.', register: 'Crea una cuenta y pon a trabajar a tu asistente de IA.' },
+  intro: { openRegistration: "Por ahora puedes registrarte sin invitación. Se requiere un código de invitación cuando 30 cuentas han estado activas en los últimos 30 días.", login: 'Inicia sesión y retoma el trabajo con tu asistente de IA.', register: 'Crea una cuenta y pon a trabajar a tu asistente de IA.' },
   fields: { email: 'Correo electrónico', emailHint: 'nombre@ejemplo.com', signInHint: 'Correo (o tu usuario anterior)', password: 'Contraseña', passwordHint: 'Introduce tu contraseña', newPasswordHint: 'Al menos 12 caracteres', confirm: 'Confirmar contraseña', confirmHint: 'Vuelve a introducir la contraseña', inviteCode: 'Código de invitación', emailCode: 'Código de verificación', emailCodeHint: '6 dígitos' },
   passwordMismatch: 'Las contraseñas no coinciden',
   emailCode: { send: 'Enviar código', sending: 'Enviando…', resend: (seconds: number) => `Reenviar en ${seconds} s`, sent: (email: string) => `Hemos enviado un código a ${email}. Vale 10 minutos; si no llega, revisa la carpeta de spam.` },

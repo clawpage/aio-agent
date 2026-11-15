@@ -6,7 +6,7 @@ export const auth: typeof zh = {
   brand: "Clawpage Agent",
   heading: { login: "Leave it to Clawpage Agent", register: "Meet your Clawpage Agent", invite: "One invite away" },
   passwordAlternative: "or use your email and password",
-  intro: { openRegistration: "The first 30 accounts can register without an invite. An invite is required once those places are filled.",
+  intro: { openRegistration: "You can register without an invite for now. An invite is required once 30 accounts have been active in the last 30 days.",
     login: "Log in and pick up where you left off with your AI assistant.",
     register: "Create an account and put your AI assistant to work.",
   },

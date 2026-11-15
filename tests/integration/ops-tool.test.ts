@@ -74,7 +74,7 @@ it("gives the owner's executors the deployment's figures as counts, and no membe
     expect(report.totals.activeToday).toBe(1);
     expect(report.acquisition).toContainEqual({ ...campaign, content: null, registerViews: 1, signups: 1, firstTask: 0, firstCompleted: 0 });
     expect(report.quality).toMatchObject({ restoreFailures: 1, restoreReasons: { deadline: 1 } });
-    expect(report.registration).toEqual({ accounts: report.totals.accounts, openLimit: 30, inviteRequired: false, unusedInvites: 1 });
+    expect(report.registration).toEqual({ accounts: report.totals.accounts, activeAccounts: report.totals.accounts, openLimit: 30, inviteRequired: false, unusedInvites: 1 });
     // Counts only: nothing that names an account, and no invite code.
     for (const key of ["accounts", "activeTodayAccounts", "boot", "welcomeCards"]) expect(report).not.toHaveProperty(key);
     expect(report.quality).not.toHaveProperty("restoreAccounts");

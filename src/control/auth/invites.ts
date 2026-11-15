@@ -6,9 +6,10 @@ import { emailTaken, normalizeEmail, usernameFromEmail } from "./email.js";
 import { t } from "../i18n/index.js";
 import { startOnboarding } from "../profile.js";
 import { consumeSignupCode, verifySignupCode } from "./signupCode.js";
+import { PERSON_EVENT_SQL } from "../analytics.js";
 
 /**
- * One-time invite codes: required once the deployment has 30 accounts.
+ * One-time invite codes: required while 30 accounts have been active in the last 30 days.
  * The owner issues them from the settings page (people ask by mailing the
  * address shown on the register form); a code becomes unusable the moment an
  * account is created with it, or when the owner revokes it.
@@ -31,10 +32,25 @@ export const OPEN_REGISTRATION_LIMIT = 30;
 /** The id whose sandbox is already provisioned for the next registration (see UserRuntimes.prepareSpare). */
 export const SPARE_ACCOUNT_KEY = "spare_user_id";
 
-/** All existing accounts count, including the owner and administrator-created members. */
-export function registrationRequiresInvite(db: Db): boolean {
-  const { count } = db.prepare("SELECT COUNT(*) AS count FROM owners").get() as { count: number };
-  return count >= OPEN_REGISTRATION_LIMIT;
+/** How far back an account's last use still counts toward the open-registration limit. */
+export const ACTIVE_WINDOW_MS = 30 * 86400000;
+
+/**
+ * Whether as many accounts as the limit were active in the last 30 days. Active = registered in that time,
+ * or used the product in it (the events the operations report counts as the person, `PERSON_EVENT_SQL`);
+ * every role counts. An account nobody has used for 30 days gives its place back.
+ */
+export function activeAccounts(db: Db, now = Date.now()): number {
+  const since = now - ACTIVE_WINDOW_MS;
+  // The events table belongs to Analytics, which a deployment may not have created yet.
+  const events = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='analytics_events'").get();
+  const used = events ? `OR id IN (SELECT user_id FROM analytics_events WHERE ts>=? AND user_id IS NOT NULL AND ${PERSON_EVENT_SQL})` : "";
+  const { count } = db.prepare(`SELECT COUNT(*) AS count FROM owners WHERE created_at>=? ${used}`).get(...(events ? [since, since] : [since])) as { count: number };
+  return count;
+}
+
+export function registrationRequiresInvite(db: Db, now = Date.now()): boolean {
+  return activeAccounts(db, now) >= OPEN_REGISTRATION_LIMIT;
 }
 
 export class RegisterError extends Error {
