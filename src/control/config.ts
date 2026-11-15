@@ -467,7 +467,7 @@ export function loadConfig(): {
     "PA_SANDBOX_CODEX_BIN",
     path.posix.join(sandboxCodexPrefix, "node_modules", ".bin", "codex"),
   );
-  const claudeCodeVersion = envStr("PA_CLAUDE_CODE_VERSION", "2.1.284");
+  const claudeCodeVersion = envStr("PA_CLAUDE_CODE_VERSION", "2.1.325");
   const claudeCodePrefix = `/home/gem/.codex/tools/claude-code-${claudeCodeVersion}`;
 
   return {

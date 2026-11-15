@@ -51,7 +51,7 @@
 | `PA_CODEX_BRIDGE` | `1` | 沙箱 Codex 跑在常驻桥接下，控制面重启时执行中的轮次不中断（见运行手册「控制面重启」）；`0` 退回直连 |
 | `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on` / `off` |
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（环境变量优先；权限宽于 600 / 400 拒绝） |
-| `PA_CLAUDE_CODE_VERSION` | `2.1.284` | 沙箱内固定版 Claude Code CLI |
+| `PA_CLAUDE_CODE_VERSION` | `2.1.325` | 沙箱内固定版 Claude Code CLI |
 | `PA_CLAUDE_CODE_AUX_MODEL` | `claude-sonnet-5-5` | Claude Code 执行器时派单使用的无工具模型 |
 | `PA_ANTHROPIC_API_BASE_URL` | `https://api.anthropic.com` | 成员网关转发 Claude 请求的上游 |
 | `PA_CHATGPT_CODEX_URL` | `https://chatgpt.com/backend-api/codex` | 成员网关转发 GPT 请求与出图的上游 |
