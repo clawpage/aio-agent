@@ -1292,7 +1292,7 @@ App 端在 `src/ui/tauri/src-tauri/gen/android/app/src/main/java/ai/clawpage/age
 ## 15. Claude Code 执行器
 
 默认只有 Codex 执行器。配置 Claude Code 凭据后，配置页出现「执行器」选项，模型列表按执行器过滤（`claude-opus-5-5`、`claude-sonnet-5-5`、
-`claude-fable-5-1`，思考强度 low～max，留空按 CLI 默认）。
+`claude-fable-5-2`、`claude-fable-5-1`，思考强度 low～max，留空按 CLI 默认）。
 
 - **整体切换**：选中后派单与执行都由 Claude Code 完成。派单使用无工具、不落盘的一次性运行（`--tools ""`，模型 `PA_CLAUDE_CODE_AUX_MODEL`）。
   成员账号默认不提供；被分配 `claude-sonnet-5-5` 的成员经成员网关使用。

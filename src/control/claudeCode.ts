@@ -31,6 +31,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const CLAUDE_MODELS: Array<{ id: string; name: string; description: "claudeOpus" | "claudeSonnet" | "claudeFable" }> = [
   { id: "claude-opus-5-5", name: "Claude Opus 5.5", description: "claudeOpus" },
   { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", description: "claudeSonnet" },
+  { id: "claude-fable-5-2", name: "Claude Fable 5.2", description: "claudeFable" },
   { id: "claude-fable-5-1", name: "Claude Fable 5.1", description: "claudeFable" },
 ];
 

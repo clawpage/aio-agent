@@ -58,7 +58,7 @@ describe("ClaudeCodeHarness", () => {
     const harness = new ClaudeCodeHarness(enabledConfig(), log);
     expect(harness.enabled).toBe(true);
     const entries = harness.modelEntries();
-    expect(entries.map((m) => m.id)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-1"]);
+    expect(entries.map((m) => m.id)).toEqual(["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5-2", "claude-fable-5-1"]);
     expect(entries.every((m) => m.modelProvider === CLAUDE_CODE_PROVIDER_ID)).toBe(true);
     expect(harness.owns("claude-opus-5-5")).toBe(true);
     expect(harness.owns("gpt-6-sol")).toBe(false);
