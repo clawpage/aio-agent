@@ -196,9 +196,8 @@ describe("sandbox workspace seed", () => {
     expect(GRAPHIC_SKILL_MD).toContain("python3 /home/gem/.codex/tools/aio-graphic/aio-render.py");
     expect(GRAPHIC_SKILL_MD).toMatch(/^---\nname: aio-graphic\ndescription: /);
     expect(GRAPHIC_SKILL_MD).toContain("never use image_generate to change its text");
-    // A reference image sets the standard, and a showpiece (a recipe card, a poster) carries generated pictures.
-    expect(GRAPHIC_SKILL_MD).toContain("A reference image from the user sets the standard");
-    expect(GRAPHIC_SKILL_MD).toContain("a small picture for each main item and each step");
+    // Illustrated graphics (a recipe card, a poster) are not built here: image_generate draws them whole.
+    expect(GRAPHIC_SKILL_MD).toContain("image_generate draws the whole image in one call");
   });
 
   it("gives both executors the market data skill and its CLI on every sandbox, without installing anything at start", async () => {

@@ -101,6 +101,8 @@ it("tells the executor to draw pictures with the image tool only when this runti
   expect(codex.threadOpts[1]?.developerInstructions).toContain(IMAGE_POLICY);
   expect(IMAGE_POLICY).toContain("![description](path)");
   expect(IMAGE_POLICY).toContain("aio-graphic skill");
+  expect(IMAGE_POLICY).toContain("one image_generate call that draws the whole image");
+  expect(IMAGE_POLICY).toContain("pass it in reference_paths");
 });
 
 it("records every execution thread's tabs against its task and marks them finished before the browser hold ends", async () => {
