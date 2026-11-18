@@ -396,7 +396,7 @@ export class SandboxCodexSession {
   /** Read-only main-agent planning; receives bounded metadata, never executes a task. */
   async planTask(prompt: string, developerInstructions?: string, model?: string, onTiming?: DispatchTimingSink): Promise<string | null> {
     const started = Date.now();
-    // Dispatch is one short JSON answer: low effort on GPT-6.1 Sol (the owner's
+    // Dispatch is one short JSON answer: low effort on GPT-6.2 Sol (the owner's
     // default and every GPT member's; the member gateway lets a request ask for
     // less than high, never more) and on Luna. Other dispatch models keep high.
     const effort = (model ?? this.#cfg.agent.titleModel) === MEMBER_GPT_MODEL || (!model && this.#cfg.agent.titleModel === "gpt-6-luna") ? "low" : "high";
@@ -448,7 +448,7 @@ export class SandboxCodexSession {
   }
 
   /**
-   * One run of the account's knowledge maintainer (docs/TASK-KB.md): GPT-6.1 Sol at low
+   * One run of the account's knowledge maintainer (docs/TASK-KB.md): GPT-6.2 Sol at low
    * effort for every account (a member's through its gateway, the owner's on its own
    * login), in a read-only ephemeral thread that may read the sandbox and use the given
    * read-only tools. It answers with text; only the control plane's kernel writes.

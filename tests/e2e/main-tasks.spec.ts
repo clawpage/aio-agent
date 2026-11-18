@@ -947,7 +947,7 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
         steps: [
             { kind: "context", at: Date.now(), timeline: "  [14:00] 用户：「规划东京三天」 → 任务 task-1「规划行程」（completed）；助理最后问：「要再加美食推荐吗？」\n▶ [14:05] 用户：「要」  ← 本次消息", candidates: 1 },
             { kind: "jev", at: Date.now(), criteria: { "resume:task-1": "第1近（14:00）「规划行程」", NEW: "独立新请求" }, result: { choice: "task-1", probabilities: { "task-1": 0.99, NEW: 0.01 }, scores:{"task-1":0.94,"task-3":0.12}, suggestion:{kind:"resume",taskId:"task-1",probability:0.99}, confident: true, latencyMs: 140 } },
-            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6.1-sol", effort: "low", attempts: 2, queueMs: 30, contextMs: 80, jevMs: 140, sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 1820, classifierMs: 2815, totalMs: 2816 } },
+            { kind: "timing", at: Date.now(), round: 1, timing: { model: "gpt-6.2-sol", effort: "low", attempts: 2, queueMs: 30, contextMs: 80, jevMs: 140, sandboxMs: 1, connectionMs: 0, threadStartMs: 60, turnStartMs: 35, firstTextMs: 900, finishMs: 1820, classifierMs: 2815, totalMs: 2816 } },
             { kind: "ask", at: Date.now(), round: 1, prompt: "你是 AIO Agent 的派单器……", answer: "{\"title\":\"美食推荐\",\"decision\":{\"kind\":\"resume\",\"taskId\":\"task-1\"}}" },
             { kind: "plan", at: Date.now(), plan: { title: "美食推荐", description:"补充东京美食推荐",decision:{kind:"resume",taskId:"task-1"}, resume: "task-1", related: ["task-1"] }, repairs: [] },
         ],
@@ -970,7 +970,7 @@ test("owner debug mode shows each message's dispatch log step by step", async ({
     await expect(relevance.first()).toContainText("94%");
     await expect(dialog).toContainText("派单器第 1 轮");
     // The model the dispatcher ran on is in the entry summary, not only in the timing step.
-    await expect(dialog.locator(".dispatch-log-chips")).toContainText("gpt-6.1-sol · low");
+    await expect(dialog.locator(".dispatch-log-chips")).toContainText("gpt-6.2-sol · low");
     await expect(dialog).toContainText("尝试 2 次");
     const stages = dialog.getByRole("list", { name: "各阶段耗时" }).getByRole("listitem");
     await expect(stages.filter({ hasText: "提交至首字" })).toContainText("900 ms");

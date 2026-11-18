@@ -67,11 +67,11 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
  const cfg={...h.ctx.cfg,memberModelPort:0,hostCodex:{...h.ctx.cfg.hostCodex,chatgptUrl:`http://127.0.0.1:${port}/backend-api/codex/`}};
  const gateway=new MemberModelGateway(cfg,h.ctx.log,undefined,undefined,undefined,undefined,hostTokens);await gateway.start();
  try{
-  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol'),b=memberConfig(cfg,'user_beta',18083),c=memberConfig(cfg,'user_gamma',18084,'claude-sonnet-5-5');
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.2-sol'),b=memberConfig(cfg,'user_beta',18083),c=memberConfig(cfg,'user_gamma',18084,'claude-sonnet-5-5');
   gateway.provision(a);gateway.provision(b);gateway.provision(c);
   const token=(m:typeof a)=>fs.readFileSync(path.join(m.dataDir,'model-token'),'utf8');
   // The member sandbox only ever gets its own gateway token and address.
-  expect(a.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);
+  expect(a.bridge.models).toEqual(['gpt-6.2-sol','gpt-6.1-terra']);
   expect(a.bridge.baseUrl).toBe(`http://host.docker.internal:${cfg.memberModelPort}/u/user_alpha/v1`);
   expect(a.claudeCode.gatewayUrl).toBeUndefined();
   for(const name of fs.readdirSync(a.dataDir))expect(fs.readFileSync(path.join(a.dataDir,name),'utf8')).not.toContain('owner-chatgpt-access');
@@ -85,7 +85,7 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
    {originator:'personal-agent','session-id':'s1','x-codex-turn-metadata':'{"turn_id":"t1"}','x-openai-internal-codex-responses-lite':'true','x-openai-account-routing-override':'other-workspace',cookie:'x=1'});
   expect(r.status).toBe(200);expect(await r.text()).toContain('response.completed');
   expect(seen[0].url).toBe('/backend-api/codex/responses');
-  expect(seen[0].body).toEqual({model:'gpt-6.1-sol',reasoning:{effort:'high',context:'all_turns'},store:false,input:'hi',stream:true});
+  expect(seen[0].body).toEqual({model:'gpt-6.2-sol',reasoning:{effort:'high',context:'all_turns'},store:false,input:'hi',stream:true});
   expect(seen[0].headers).toMatchObject({authorization:'Bearer owner-chatgpt-access','chatgpt-account-id':'acct_owner',originator:'personal-agent','session-id':'s1','x-codex-turn-metadata':'{"turn_id":"t1"}','x-openai-internal-codex-responses-lite':'true'});
   expect(seen[0].headers['x-openai-account-routing-override']).toBeUndefined();expect(seen[0].headers.cookie).toBeUndefined();
   expect(JSON.stringify(seen[0].headers)).not.toContain(token(a));
@@ -114,7 +114,7 @@ it('sends only a GPT-assigned member to ChatGPT on its model, adding the control
   expect((await post('user_alpha',token(a),{input:'expired'})).status).toBe(401);expect(invalidated).toBe(1);
   // A Claude member has no Responses route even with its own valid token.
   let count=seen.length;
-  expect((await post(c.runtimeUserId!,token(c),{model:'gpt-6.1-sol',input:'hi'})).status).toBe(403);expect(seen).toHaveLength(count);
+  expect((await post(c.runtimeUserId!,token(c),{model:'gpt-6.2-sol',input:'hi'})).status).toBe(403);expect(seen).toHaveLength(count);
   // Without the control plane's ChatGPT login a GPT member fails closed; there is nothing to fall back to.
   loggedIn=false;count=seen.length;
   expect((await post('user_alpha',token(a),{input:'hi'})).status).toBe(502);expect(seen).toHaveLength(count);
@@ -132,7 +132,7 @@ it('waits out a brief ChatGPT rate limit before answering, but hands a usage cap
  const cfg={...h.ctx.cfg,memberModelPort:0,hostCodex:{...h.ctx.cfg.hostCodex,chatgptUrl:`http://127.0.0.1:${(upstream.address() as any).port}/backend-api/codex/`}};
  const gateway=new MemberModelGateway(cfg,h.ctx.log,undefined,undefined,undefined,undefined,hostTokens);await gateway.start();
  try{
-  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');gateway.provision(a);
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.2-sol');gateway.provision(a);
   const token=fs.readFileSync(path.join(a.dataDir,'model-token'),'utf8');
   const post=()=>fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({input:'旧的肉泥放到第二顿',stream:true})});
   // Two 429s a moment apart, then an answer: the member's executor only ever sees the answer.
@@ -173,7 +173,7 @@ it('holds a request that comes before its account is loaded until it is, rather 
  await gateway.start(new Promise<void>(resolve=>{loaded=resolve;}));
  try{
   // The account's token is on disk from before the restart; its runtime is still loading.
-  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.2-sol');
   fs.mkdirSync(a.dataDir,{recursive:true});fs.writeFileSync(path.join(a.dataDir,'model-token'),'a'.repeat(64));
   const arrived=new Promise(resolve=>(gateway as any).server.once('request',resolve));
   const answer=fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${'a'.repeat(64)}`,'content-type':'application/json'},body:JSON.stringify({input:'hi',stream:true})});
@@ -195,7 +195,7 @@ it('turns a member away once the day\'s tokens are used up, in a way neither cli
  gateway.quota=async()=>({limit:100_000_000,used,resetsAt,exceeded:used>=100_000_000});
  await gateway.start();
  try{
-  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.1-sol');gateway.provision(a);
+  const a=memberConfig(cfg,'user_alpha',18082,'gpt-6.2-sol');gateway.provision(a);
   const token=fs.readFileSync(path.join(a.dataDir,'model-token'),'utf8');
   const post=()=>fetch(`http://127.0.0.1:${gateway.port}/u/user_alpha/v1/responses`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({input:'hi',stream:true})});
   expect((await post()).status).toBe(200);expect(asked).toBe(1);

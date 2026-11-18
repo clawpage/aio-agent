@@ -67,7 +67,7 @@ export const feed: typeof zh = {
   empty: {
     title: 'こんにちは、Clawpage Agent です',
     titleFor: (name: string) => `${name}さん、こんにちは。Clawpage Agent です`,
-    beta: '期間限定ベータ · GPT-6.1 Sol 無料で利用可能',
+    beta: '期間限定ベータ · GPT-6.2 Sol 無料で利用可能',
     body: 'やりたいことを伝えてください。わたし専用のパソコンで代わりに片づけます。',
     hint: 'タップして試すか、そのまま話しかけてください：',
     features: [

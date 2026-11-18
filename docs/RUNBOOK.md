@@ -94,9 +94,9 @@ PA_COMPANION_ORIGIN=https://agent-workspace.clawpage.ai npm run smoke
 
 | 配置 | 默认值 | 说明 |
 | --- | --- | --- |
-| `PA_SANDBOX_CODEX_VERSION` | `0.166.0` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
+| `PA_SANDBOX_CODEX_VERSION` | `0.170.0` | 固定版本；安装前缀与二进制路径都由它推导，不会与路径不一致 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 新会话与旧会话后续轮次的默认模型；`/api/models` 也以它标记默认项 |
-| `PA_TITLE_MODEL` | `gpt-6.1-sol` | 主会话派单器（Codex 执行器时）的临时线程模型，Sol 6.1 / Luna 为 low、90 秒；其他模型 high；满载时 Sol 与 Luna 互为备用、只重试一次；变量名沿用旧称 |
+| `PA_TITLE_MODEL` | `gpt-6.2-sol` | 主会话派单器（Codex 执行器时）的临时线程模型，Sol 6.2 / Luna 为 low、90 秒；其他模型 high；满载时 Sol 与 Luna 互为备用、只重试一次；变量名沿用旧称 |
 
 - 二进制路径：`/home/gem/.codex/tools/codex-<版本>/node_modules/.bin/codex`（在 `personal-agent-codex` 卷内）。
   核实版本后再把它链接到 `/opt/gem/bin/codex`（登录 shell 的 PATH 首位、排在镜像自带旧版之前），
@@ -225,10 +225,10 @@ docker exec aio-control-1 node bin/create-user.mjs <username>          # compose
 ```
 
 账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
-也可凭 owner 在配置页「邀请码」生成的一次性邀请码在 `/register` 自助注册（同样只建 member）；注册页提示的申请邮箱来自 `PA_INVITE_EMAIL`（当前部署写在 `var/deploy/control.env`，为 invitation@clawpage.ai）。两种方式都不改变 owner 密码与会话。member 默认 `gpt-6.1-sol` / high，经成员模型网关使用控制面的 ChatGPT 登录，因此上线前需确认控制面已 `codex-login` 且 `AIO_HOST_CODEX=on`。
+也可凭 owner 在配置页「邀请码」生成的一次性邀请码在 `/register` 自助注册（同样只建 member）；注册页提示的申请邮箱来自 `PA_INVITE_EMAIL`（当前部署写在 `var/deploy/control.env`，为 invitation@clawpage.ai）。两种方式都不改变 owner 密码与会话。member 默认 `gpt-6.2-sol` / high，经成员模型网关使用控制面的 ChatGPT 登录，因此上线前需确认控制面已 `codex-login` 且 `AIO_HOST_CODEX=on`。
 member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在控制层数据目录的 `users/<散列>/`；owner 原卷保留。
 成员工作区与 owner 共用 `agent-workspace.clawpage.ai`，用路径 `/u/<用户名>/`（兼容旧的 `/u/<散列>/`）区分账号，无需新增 CNAME/TLS/tunnel；前缀与会话账号不符时 401，不会回退 owner 工作区。
-成员模型网关只接受各成员分配模型的请求：`gpt-6.1-sol` 成员的无状态 Responses、Claude 成员的 Messages，其余一律拒绝（默认端口 4902，控制面的 ChatGPT 登录与 owner 的 Claude 凭据只在宿主侧附加），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
+成员模型网关只接受各成员分配模型的请求：`gpt-6.2-sol` 成员的无状态 Responses、Claude 成员的 Messages，其余一律拒绝（默认端口 4902，控制面的 ChatGPT 登录与 owner 的 Claude 凭据只在宿主侧附加），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
 运行验收必须包括：两个账号的同名文件互不可见；任务/HTTP/WS 指向各自容器；成员不能 TCP 连接 owner 容器与宿主私网服务；成员卷没有 owner auth.json/记忆；成员无法读取 owner 历史响应。
 
 
@@ -441,7 +441,7 @@ app-server 的 `mcpServerStatus/list` 与 `app/list` 只验元数据，应分别
 ## 12. 派单超时、反复追问与页面压力
 
 先区分派单模型与执行模型：owner 选择 GPT 时，执行按其设置运行，派单使用
-`PA_TITLE_MODEL`（默认 `gpt-6.1-sol`，low）；选择 Claude 时，派单走 Claude auxiliary
+`PA_TITLE_MODEL`（默认 `gpt-6.2-sol`，low）；选择 Claude 时，派单走 Claude auxiliary
 model。不能只凭任务卡上的执行模型，把分配失败归因于该模型的回答质量。
 
 - 从 `recall_events.fail_reason`、`latency_ms` 与任务错误区分会话创建超时、模型结果无效、

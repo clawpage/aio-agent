@@ -44,10 +44,10 @@
 | `PA_HOST_CODEX_BIN` / `PA_HOST_CODEX_HOME` | `codex` / `~/.codex` | 本机 Codex CLI 与登录目录 |
 | `PA_HOST_CODEX_TIMEOUT_SECONDS` / `PA_HOST_TOKEN_SKEW_HOURS` | `10` / `6` | 取凭据超时；令牌剩余不足多少小时提前刷新 |
 | `PA_DEFAULT_MODEL` | `gpt-6-sol` | 配置页未另选时的默认模型；配置保存在 owner `meta`，按轮次冻结 |
-| `PA_TITLE_MODEL` | `gpt-6.1-sol` | Codex 执行器时派单器的临时线程模型；`gpt-6.1-sol` 与 `gpt-6-luna` 用 low，其他 high（变量名沿用旧称） |
+| `PA_TITLE_MODEL` | `gpt-6.2-sol` | Codex 执行器时派单器的临时线程模型；`gpt-6.2-sol` 与 `gpt-6-luna` 用 low，其他 high（变量名沿用旧称） |
 | `PA_MAX_CONCURRENT_TURNS` | `3` | 同时执行的轮次上限（clamp 到 1–3），同一会话串行，排队 FIFO |
 | `PA_REASONING_SUMMARY` | `concise` | 思考摘要模式（`concise` / `auto` / `detailed` / `none`） |
-| `PA_SANDBOX_CODEX_VERSION` | `0.166.0` | 沙箱内固定版 Codex CLI（持久卷内，升级见运行手册） |
+| `PA_SANDBOX_CODEX_VERSION` | `0.170.0` | 沙箱内固定版 Codex CLI（持久卷内，升级见运行手册） |
 | `PA_CODEX_BRIDGE` | `1` | 沙箱 Codex 跑在常驻桥接下，控制面重启时执行中的轮次不中断（见运行手册「控制面重启」）；`0` 退回直连 |
 | `PA_CLAUDE_CODE_ENABLED` | `auto` | 是否提供 Claude Code 执行器；`auto` 仅在取到凭据时出现，另有 `on` / `off` |
 | `PA_CLAUDE_CODE_SECRETS_FILE` | `~/.config/aio-agent/claude-code.env` | `CLAUDE_CODE_OAUTH_TOKEN` 或 `ANTHROPIC_API_KEY`（环境变量优先；权限宽于 600 / 400 拒绝） |

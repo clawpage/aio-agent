@@ -488,7 +488,7 @@ describe("HarnessSession", () => {
     selected = true;
     await harness.planTask("p");
     expect(aux).toEqual(["plan"]);
-    await harness.planTask("p", undefined, "gpt-6.1-sol");
+    await harness.planTask("p", undefined, "gpt-6.2-sol");
     expect(aux).toEqual(["plan"]);
     selected = false;
     await harness.planTask("p", undefined, "claude-sonnet-5-5");
@@ -588,7 +588,7 @@ describe("AgentManager with the Claude Code harness", () => {
   });
 
   it("starts a follow-up on another ChatGPT model in a fresh thread with the earlier exchange", async () => {
-    // Resuming a thread last run on gpt-6-sol with gpt-6.1-sol was refused by ChatGPT ("not enabled in rustponsesapi").
+    // Resuming a thread last run on gpt-6-sol with gpt-6.2-sol was refused by ChatGPT ("not enabled in rustponsesapi").
     const models = await agent.listModels();
     agent.saveAgentSettings({ model: "gpt-6-sol", effort: "high" }, models);
     const conv = agent.createConversation({ title: "model switch" });

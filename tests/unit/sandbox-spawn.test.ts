@@ -46,7 +46,7 @@ describe("sandbox Codex launch with the bridge enabled", () => {
     const base = testConfig("/tmp/pa-spawn-bridge", 1);
     const cfg = {
       ...base,
-      bridge: { ...base.bridge, enabled: "on", baseUrl: "http://host.docker.internal:4902/u/user_g/v1", models: ["gpt-6.1-sol"], secretsFile: file },
+      bridge: { ...base.bridge, enabled: "on", baseUrl: "http://host.docker.internal:4902/u/user_g/v1", models: ["gpt-6.2-sol"], secretsFile: file },
     };
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     const { container, calls } = capture(cfg);

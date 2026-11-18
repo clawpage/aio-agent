@@ -461,7 +461,7 @@ export function loadConfig(): {
 
   // Pinned Codex CLI in the persistent CODEX_HOME volume. One version drives
   // both the install prefix and the binary path so they can never drift apart.
-  const sandboxCodexVersion = envStr("PA_SANDBOX_CODEX_VERSION", "0.166.0");
+  const sandboxCodexVersion = envStr("PA_SANDBOX_CODEX_VERSION", "0.170.0");
   const sandboxCodexPrefix = envStr("PA_SANDBOX_CODEX_PREFIX", `/home/gem/.codex/tools/codex-${sandboxCodexVersion}`);
   const sandboxCodexBin = envStr(
     "PA_SANDBOX_CODEX_BIN",
@@ -606,7 +606,7 @@ export function loadConfig(): {
       defaultModel: envStr("PA_DEFAULT_MODEL", "gpt-6-sol"),
       // Only the dispatcher's auxiliary run uses a different model; the main agent
       // stays on PA_DEFAULT_MODEL.
-      titleModel: envStr("PA_TITLE_MODEL", "gpt-6.1-sol"),
+      titleModel: envStr("PA_TITLE_MODEL", "gpt-6.2-sol"),
       // At most three main turns run at once across different conversations; a
       // fourth conversation waits in FIFO order for a slot to free. One
       // conversation still runs at most one turn at a time. The env value is

@@ -101,7 +101,7 @@ export class ClawpageAi {
   }
 
   /**
-   * One answer for a shared library's maintainer (docs/SHARED-KB.md §3.3): GPT-6.1 Sol at low effort on the
+   * One answer for a shared library's maintainer (docs/SHARED-KB.md §3.3): GPT-6.2 Sol at low effort on the
    * control plane's login, whatever the account's own model, counted in `userId`'s usage.
    */
   async maintain(userId: string, system: string, prompt: string): Promise<string> {

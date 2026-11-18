@@ -37,7 +37,7 @@ function scenario() {
   account(root, 'user_c', 'member', d(0)); // today: only its agent and a visitor did anything
   const a = memberDb(dir, 'user_a'), b = memberDb(dir, 'user_b');
   task(a, 'user_a', d(12), 'completed', { ms: 300_000, model: 'claude-sonnet-5.5' });
-  task(a, 'user_a', d(0), 'interrupted', { model: 'gpt-6.1-sol' });
+  task(a, 'user_a', d(0), 'interrupted', { model: 'gpt-6.2-sol' });
   task(b, 'user_b', d(0), 'running', { schedule: 'sched-b' });
   task(root, 'owner_1', d(10), 'completed', { ms: 30_000 });
   task(root, 'owner_1', d(3), 'completed', { ms: 60_000 });
@@ -123,7 +123,7 @@ it('compares the range with the period before it and counts outcomes, durations,
   expect(report.daily.at(-1)).toMatchObject({ date: '2026-10-13', active: 2, sessions: 1, wau: 3 });
 
   const rows = Object.fromEntries(report.accounts!.map(r => [r.id, r]));
-  expect(rows.user_a).toMatchObject({ activeDays: 1, sessions: 0, tasks: 1, completed: 0, failed: 0, model: 'gpt-6.1-sol', lastSeenAt: d(0) });
+  expect(rows.user_a).toMatchObject({ activeDays: 1, sessions: 0, tasks: 1, completed: 0, failed: 0, model: 'gpt-6.2-sol', lastSeenAt: d(0) });
   expect(rows.user_b).toMatchObject({ activeDays: 1, sessions: 1, tasks: 1, platforms: ['ios'], model: null });
   expect(rows.owner_1).toMatchObject({ activeDays: 2, tasks: 3, completed: 2, failed: 1 });
   expect(rows.user_c).toMatchObject({ lastSeenAt: null, activeDays: 0 });

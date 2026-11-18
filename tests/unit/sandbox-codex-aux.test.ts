@@ -327,8 +327,8 @@ it('records the actual dispatcher model and stage timings from notifications',as
  const session=makeSession(server,200), timing:Record<string,string|number>={};
  try {
   expect(await session.planTask('classify',undefined,undefined,part=>Object.assign(timing,part))).toBe('{}');
-  expect(timing).toMatchObject({model:'gpt-6.1-sol',effort:'low',attempts:1});
-  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
+  expect(timing).toMatchObject({model:'gpt-6.2-sol',effort:'low',attempts:1});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.2-sol',effort:'low'});
   for(const key of ['connectionMs','threadStartMs','turnStartMs','firstTextMs','finishMs','classifierMs']) expect(timing[key]).toEqual(expect.any(Number));
   expect(timing.classifierMs).toBeGreaterThanOrEqual(timing.firstTextMs as number);
  }finally{session.close();}
@@ -341,13 +341,13 @@ it('runs member planning through the fixed provider at low effort and refuses an
  const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
  const session=makeSession(server,200,bridge);
  try {
-  expect(await session.planTask('request','soul','gpt-6.1-sol')).toBe('{}');
-  expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway',ephemeral:true});
+  expect(await session.planTask('request','soul','gpt-6.2-sol')).toBe('{}');
+  expect(server.inbound.find(r=>r.method==='thread/start')?.params).toMatchObject({model:'gpt-6.2-sol',modelProvider:'aio_gateway',ephemeral:true});
   // Dispatch is one short JSON answer: a GPT member's dispatcher runs at low, like the owner's.
-  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.1-sol',effort:'low'});
+  expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6.2-sol',effort:'low'});
  } finally {session.close();}
  const unavailable=makeSession(new FakeAppServer(),200);
- try {await expect(unavailable.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow('temporarily unavailable');}finally{unavailable.close();}
+ try {await expect(unavailable.planTask('request','soul','gpt-6.2-sol')).rejects.toThrow('temporarily unavailable');}finally{unavailable.close();}
 });
 
 it('shows the reason a planning turn failed, and a failure of the model service only as maintenance',async()=>{
@@ -374,7 +374,7 @@ it('answers once more on another model when the dispatcher model is at capacity'
  const session=makeSession(server,200);
  try {
   expect(await session.planTask('request','soul')).toBe('{}');
-  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>[r.params?.model,r.params?.effort])).toEqual([['gpt-6.1-sol','low'],['gpt-6-luna','low']]);
+  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>[r.params?.model,r.params?.effort])).toEqual([['gpt-6.2-sol','low'],['gpt-6-luna','low']]);
   // The owner's retry stays on its own login, never the member gateway.
   expect(server.inbound.filter(r=>r.method==='thread/start').every(r=>r.params?.modelProvider===undefined)).toBe(true);
  } finally {session.close();}
@@ -388,8 +388,8 @@ it('retries a member at capacity once on the assigned model, then shows the reas
  const bridge={providerForModel:()=> 'aio_gateway',providerConfigArgs:()=>[],providerEnv:()=>({})} as unknown as BridgeModel;
  const session=makeSession(server,200,bridge);
  try {
-  await expect(session.planTask('request','soul','gpt-6.1-sol')).rejects.toThrow(`Task assignment failed: ${busy}`);
-  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>r.params?.model)).toEqual(['gpt-6.1-sol','gpt-6.1-sol']);
+  await expect(session.planTask('request','soul','gpt-6.2-sol')).rejects.toThrow(`Task assignment failed: ${busy}`);
+  expect(server.inbound.filter(r=>r.method==='turn/start').map(r=>r.params?.model)).toEqual(['gpt-6.2-sol','gpt-6.2-sol']);
   expect(server.inbound.filter(r=>r.method==='thread/start').map(r=>r.params?.modelProvider)).toEqual(['aio_gateway','aio_gateway']);
  } finally {session.close();}
 });
@@ -503,8 +503,8 @@ it('names a task on Luna at low effort for the owner and on the assigned model f
  try {
   expect(await session.titleTask('name it')).toBe('东京迪士尼门票');
   expect(server.inbound.find(r=>r.method==='turn/start')?.params).toMatchObject({model:'gpt-6-luna',effort:'low'});
-  expect(await session.titleTask('name it','gpt-6.1-sol')).toBe('东京迪士尼门票');
-  expect(server.inbound.filter(r=>r.method==='thread/start').at(-1)?.params).toMatchObject({model:'gpt-6.1-sol',modelProvider:'aio_gateway'});
+  expect(await session.titleTask('name it','gpt-6.2-sol')).toBe('东京迪士尼门票');
+  expect(server.inbound.filter(r=>r.method==='thread/start').at(-1)?.params).toMatchObject({model:'gpt-6.2-sol',modelProvider:'aio_gateway'});
  } finally {session.close();}
  const failing=new FakeAppServer();
  failing.handle('thread/start',()=>({thread:{id:'t'}}));

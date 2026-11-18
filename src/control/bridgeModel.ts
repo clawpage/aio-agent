@@ -25,8 +25,8 @@ interface BridgeModelSpec {
   inputModalities: string[];
 }
 const BRIDGE_MODEL_SPECS: Record<string, BridgeModelSpec> = {
-  "gpt-6.1-sol": {
-    displayName: "GPT-6.1 Sol",
+  "gpt-6.2-sol": {
+    displayName: "GPT-6.2 Sol",
     description: () => t().agent.models.bridgeChatgpt,
     supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
     defaultReasoningEffort: "low",

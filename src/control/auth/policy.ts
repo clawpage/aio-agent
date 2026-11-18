@@ -2,7 +2,7 @@ import type { Db } from "../db.js";
 import { getUser } from "./owner.js";
 
 /** Runs on the control plane's own ChatGPT login through the member gateway, which adds it on the host. */
-export const MEMBER_GPT_MODEL = "gpt-6.1-sol";
+export const MEMBER_GPT_MODEL = "gpt-6.2-sol";
 /** Runs on Claude Code through the member gateway, with the owner's credential kept on the host. */
 export const MEMBER_CLAUDE_MODEL = "claude-sonnet-5-5";
 /** Every scheduled run on GPT (the owner's, and a GPT member's through its gateway), at Auto effort. */

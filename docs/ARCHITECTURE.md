@@ -121,7 +121,7 @@ planning_failed 可安全重试分类；blocked 提示前置结果需要核对�
 
 数据库保留兼容表名 `owners`，增加 `role=owner|member`；原 `owner_1` 迁移为 owner，密码与已有 session 不变。
 任务经 conversation.owner_id 绑定账号；列表、详情、事件回放/实时流、审批、引用、停止与派单历史均核对归属。
-owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定为管理员分配的模型与推理强度（默认 GPT-6.1 Sol / 推理强度「自动」：Jev 按任务选、拿不准时 high；可分配 Claude Sonnet 5.5 与固定档位），服务端拒绝覆盖，该模型不可用时失败，不换用别的模型。
+owner 维护自己的模型与 SOUL，各 member 从默认 SOUL 开始独立保存；member 派单和执行固定为管理员分配的模型与推理强度（默认 GPT-6.2 Sol / 推理强度「自动」：Jev 按任务选、拿不准时 high；可分配 Claude Sonnet 5.5 与固定档位），服务端拒绝覆盖，该模型不可用时失败，不换用别的模型。
 member 不显示配置/模型/提示原文。这里的隐藏指产品配置及结构化元数据，不对正常回答文字做删词处理。
 
 `UserRuntimes` 按服务器查证的账号身份选择完整运行环境，禁止客户端指定容器、端口、目录或上游。
@@ -153,7 +153,7 @@ HTTP、SSE、WebSocket、文件预览、上传、终端与浏览器都走同一�
   只改 `model` 列、不动历史；之后用户手动选择（包括 5.5）永久保留。
 - **派单器的临时线程**（Codex 执行器时，独立于主对话）：主会话派单在沙箱内启动一个临时线程
   （`thread/start {ephemeral:true, sandbox:"read-only", approvalPolicy:"never", model: PA_TITLE_MODEL}`，
-  `gpt-6.1-sol` 与 `gpt-6-luna` 用 low、其他模型 high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
+  `gpt-6.2-sol` 与 `gpt-6-luna` 用 low、其他模型 high，90 秒）。只有临时线程被 `threadSubscriber` 接管，其通知、审批、delta 不会进入用户会话
   （`#conversationForThread` 对未知线程不回退到活动会话）。只有 `turn/completed` 状态为 `completed`
   才采用结果；超时返回 `null` 并 best-effort `turn/interrupt`，同时把该线程标记为 tombstone：直到
   真正收到 `turn/completed` 或会话关闭前，它的所有通知继续丢弃，避免迟到的 delta 被 `#bufferDelta`

@@ -73,12 +73,12 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   const a=memberConfig(h.ctx.cfg,u.id,19001),b=memberConfig(h.ctx.cfg,'user_other',19002);
   for(const key of ['dbPath','dataDir','logDir'] as const)expect(a[key]).not.toBe(b[key]);
   for(const key of ['workspaceVolume','codexVolume','browserVolume','networkName','containerName','hostPort'] as const){expect(a.sandbox[key]).not.toBe(b.sandbox[key]);expect(a.sandbox[key]).not.toBe(h.ctx.cfg.sandbox[key]);}
-  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);
+  expect(a.memberRuntime).toBe(true);expect(a.bridge.models).toEqual(['gpt-6.2-sol','gpt-6.1-terra']);
   const oauth=memberConfig({...h.ctx.cfg,googleClientId:'owner-client',googleClientSecret:'owner-secret'},u.id,19001);
   expect(oauth.googleClientId).toBe('');expect(oauth.googleClientSecret).toBe('');
   // Only the fixed Chromium flag reaches a member container, never the owner's extra env.
   expect(memberConfig({...h.ctx.cfg,sandbox:{...h.ctx.cfg.sandbox,extraEnv:['OWNER_ONLY=1']}},u.id,19001).sandbox.extraEnv).toEqual(['BROWSER_NO_SANDBOX=--no-sandbox']);
-  expect(a.memberModel).toBe('gpt-6.1-sol');
+  expect(a.memberModel).toBe('gpt-6.2-sol');
   // Every browser, the owner's included, is released when idle unless switched off.
   expect(h.ctx.cfg.browser.releaseWhenIdle).toBe(true);
   expect(a.browser.releaseWhenIdle).toBe(true);
@@ -86,8 +86,8 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   // Only the administrator's assignment picks another model, and only from the member list.
   expect(()=>memberConfig(h.ctx.cfg,u.id,19001,'claude-opus-5-5')).toThrow('Unsupported member model');
   // A GPT member's models (its own, and Terra for scheduled runs) are what its gateway provider serves; a Claude member's runs on Claude Code.
-  const g=memberConfig(h.ctx.cfg,u.id,19001,'gpt-6.1-sol');
-  expect(g.bridge.models).toEqual(['gpt-6.1-sol','gpt-6.1-terra']);expect(g.agent.defaultModel).toBe('gpt-6.1-sol');
+  const g=memberConfig(h.ctx.cfg,u.id,19001,'gpt-6.2-sol');
+  expect(g.bridge.models).toEqual(['gpt-6.2-sol','gpt-6.1-terra']);expect(g.agent.defaultModel).toBe('gpt-6.2-sol');
   expect(memberConfig(h.ctx.cfg,u.id,19001,'claude-sonnet-5-5').bridge.models).toEqual([]);
   h.ctx.db.prepare('INSERT INTO meta(key,value) VALUES(?,?)').run(`member_model:${u.id}`,'claude-sonnet-5-5');
   let calls=0;
@@ -100,7 +100,7 @@ it('derives disjoint persistent data, volumes and networks, coalesces concurrent
   h.ctx.db.prepare('UPDATE meta SET value=? WHERE key=?').run('deepseek-v4.1-flash',`member_model:${u.id}`);
   let fallback:string|undefined;
   const legacy=new UserRuntimes(h.ctx,async opts=>{fallback=opts?.config?.memberModel;return {ctx:h.ctx,db:h.ctx.db,shutdown:async()=>{}};});
-  await legacy.resolve(u.id);expect(fallback).toBe('gpt-6.1-sol');
+  await legacy.resolve(u.id);expect(fallback).toBe('gpt-6.2-sol');
   await legacy.shutdown();
  }finally{await h.shutdown();}
 });

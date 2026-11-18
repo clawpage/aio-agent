@@ -15,7 +15,7 @@ type Json = Record<string, any>;
  * the control plane pays through subscription logins, not per token. Input is charged without its cached part.
  */
 export const PRICES: Record<string, { input: number; cached: number; cacheWrite: number; output: number }> = {
-  'gpt-6.1-sol': { input: 2, cached: 0.1, cacheWrite: 2.5, output: 10 },
+  'gpt-6.2-sol': { input: 2, cached: 0.1, cacheWrite: 2.5, output: 10 },
   'gpt-6.1-terra': { input: 1, cached: 0.05, cacheWrite: 1, output: 5 },
   'claude-sonnet-5-5': { input: 2, cached: 0.2, cacheWrite: 2.5, output: 10 },
 };

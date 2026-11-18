@@ -37,11 +37,11 @@ it("answers on the account's own model: a GPT member's at most at its assigned e
     });
     const request = { system: "Grade it.", messages: [{ role: "user" as const, content: "my answer" }, { role: "assistant" as const, content: "ok" }, { role: "user" as const, content: "again" }], effort: "high" as const };
 
-    expect(await ai.answer(gpt.id, request)).toEqual({ text: '{"score": 3}', model: "gpt-6.1-sol" });
+    expect(await ai.answer(gpt.id, request)).toEqual({ text: '{"score": 3}', model: "gpt-6.2-sol" });
     expect(calls[0]!.url).toBe("https://chatgpt.test/codex/responses");
     expect(calls[0]!.headers).toMatchObject({ authorization: "Bearer host-access", "chatgpt-account-id": "acct" });
     expect(calls[0]!.body).toMatchObject({
-      model: "gpt-6.1-sol", instructions: "Grade it.", reasoning: { effort: "low" }, store: false, stream: true, tools: [],
+      model: "gpt-6.2-sol", instructions: "Grade it.", reasoning: { effort: "low" }, store: false, stream: true, tools: [],
       input: [
         { type: "message", role: "user", content: [{ type: "input_text", text: "my answer" }] },
         { type: "message", role: "assistant", content: [{ type: "output_text", text: "ok" }] },

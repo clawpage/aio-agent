@@ -86,7 +86,7 @@ it('reads cold historical member stores in memory and reports corrupt stores as 
 it('estimates each account\'s cost at its model\'s list prices and shows a member\'s share of today\'s tokens', () => {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'aio-usage-'));dirs.push(dir);
   const root=db(), cfg=testConfig(dir,1);user(root);user(root,'m','member','member');
-  root.prepare("INSERT INTO meta(key,value) VALUES('member_model:m','gpt-6.1-sol')").run();
+  root.prepare("INSERT INTO meta(key,value) VALUES('member_model:m','gpt-6.2-sol')").run();
   writeAgentSettings(root,{model:'some-unpriced-model'} as never);
   const now=Date.parse('2026-11-05T23:00:00Z');
   new UsageLedger(root).codex(snapshot('owner',1_000_000,0),now-1000);
@@ -97,7 +97,7 @@ it('estimates each account\'s cost at its model\'s list prices and shows a membe
   ledger.once('member-turn',{input_tokens:3_000_000,output_tokens:100_000,cache_read_input_tokens:1_000_000},false,now-1000);
   const result=usageReport(root,cfg,7,now);
   const m=result.accounts.find(a=>a.username==='member')!, owner=result.accounts.find(a=>a.username==='owner')!;
-  expect(m.model).toBe('gpt-6.1-sol');expect(m.totals.usd).toBeCloseTo(5.1,6);
+  expect(m.model).toBe('gpt-6.2-sol');expect(m.totals.usd).toBeCloseTo(5.1,6);
   expect(m.quota).toEqual({limit:100_000_000,used:3_100_000,resetsAt:Date.parse('2026-11-06T10:00:00Z'),exceeded:false});
   // An account on a model without a price is not guessed at, and the owner has no daily limit.
   expect(owner.model).toBe('some-unpriced-model');expect(owner.totals.usd).toBeNull();expect(owner.quota).toBeNull();

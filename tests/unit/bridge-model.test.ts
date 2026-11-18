@@ -14,7 +14,7 @@ const SECRET_VALUE = "sk-test-bridge-secret-value-0001";
 const GATEWAY_URL = "http://host.docker.internal:4902/u/user_g/v1";
 
 /** A runtime whose provider is the member gateway, as the gateway provisions a member's. */
-function gatewayConfig(cfg: Config, secretsFile: string, models = ["gpt-6.1-sol"]): Config {
+function gatewayConfig(cfg: Config, secretsFile: string, models = ["gpt-6.2-sol"]): Config {
   return { ...cfg, bridge: { ...cfg.bridge, enabled: "on", baseUrl: GATEWAY_URL, secretsFile, models } };
 }
 
@@ -88,7 +88,7 @@ describe("BridgeModel configuration", () => {
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
     expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
     // The configured gateway model may not be claimed while the provider is off.
-    expect(bridge.providerForModel("gpt-6.1-sol")).toBe(CHATGPT_PROVIDER_ID);
+    expect(bridge.providerForModel("gpt-6.2-sol")).toBe(CHATGPT_PROVIDER_ID);
     // Nor is anything on by default: only the member gateway switches it on.
     expect(new BridgeModel(testConfig("/tmp/pa-bridge-default", 1), new Logger("error", undefined, false)).enabled).toBe(false);
   });
@@ -101,10 +101,10 @@ describe("BridgeModel configuration", () => {
     const bridge = new BridgeModel(cfg, new Logger("error", undefined, false));
     expect(bridge.enabled).toBe(true);
 
-    expect(bridge.modelIds).toEqual(["gpt-6.1-sol"]);
+    expect(bridge.modelIds).toEqual(["gpt-6.2-sol"]);
     const [entry] = bridge.modelEntries();
-    expect(entry?.id).toBe("gpt-6.1-sol");
-    expect(entry?.displayName).toBe("GPT-6.1 Sol");
+    expect(entry?.id).toBe("gpt-6.2-sol");
+    expect(entry?.displayName).toBe("GPT-6.2 Sol");
     expect(entry?.modelProvider).toBe("aio_gateway");
     expect(entry?.isDefault).toBe(false);
     expect(entry?.inputModalities).toEqual(["text", "image"]);
@@ -120,8 +120,8 @@ describe("BridgeModel configuration", () => {
     // The key value is never in the arguments, only the variable name.
     expect(args.join(" ")).not.toContain(SECRET_VALUE);
 
-    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("aio_gateway");
-    expect(bridge.isTextOnly("gpt-6.1-sol")).toBe(false);
+    expect(bridge.providerForModel("gpt-6.2-sol")).toBe("aio_gateway");
+    expect(bridge.isTextOnly("gpt-6.2-sol")).toBe(false);
     expect(bridge.providerForModel("gpt-6-sol")).toBe(CHATGPT_PROVIDER_ID);
     expect(bridge.isTextOnly("gpt-6-sol")).toBe(false);
   });
@@ -181,7 +181,7 @@ describe("AgentManager with the bridge enabled", () => {
 
   it("adds the bridge model to the catalog without changing the configured default", async () => {
     const models = await agent.listModels();
-    const bridgeEntry = models.find((m) => m.id === "gpt-6.1-sol");
+    const bridgeEntry = models.find((m) => m.id === "gpt-6.2-sol");
     expect(bridgeEntry?.modelProvider).toBe("aio_gateway");
     expect(bridgeEntry?.inputModalities).toEqual(["text", "image"]);
     // The app default is still the ChatGPT model the product ships with.
@@ -205,7 +205,7 @@ describe("AgentManager with the bridge enabled", () => {
     expect(codex.forkedThreads.length).toBe(0);
 
     // Switch to the bridge model: the provider must change, which requires a fork.
-    agent.saveAgentSettings({ model: "gpt-6.1-sol", effort: "high" }, await agent.listModels());
+    agent.saveAgentSettings({ model: "gpt-6.2-sol", effort: "high" }, await agent.listModels());
     agent.submitTurn({ conversationId: conv.id, text: "three", clientMessageId: "s3" });
     await tick();
     expect(codex.forkedThreads.length).toBe(1);
@@ -290,11 +290,11 @@ describe("A member assigned GPT", () => {
     cleanups.push(() => fs.rmSync(dir, { recursive: true, force: true }));
     const file = writeSecrets(dir, `AIO_MEMBER_MODEL_TOKEN=${"a".repeat(64)}\n`);
     const base = gatewayConfig(testConfig("/tmp/pa-member-gpt", 1), file);
-    const cfg = { ...base, memberRuntime: true, memberModel: "gpt-6.1-sol", agent: { ...base.agent, defaultModel: "gpt-6.1-sol" } };
+    const cfg = { ...base, memberRuntime: true, memberModel: "gpt-6.2-sol", agent: { ...base.agent, defaultModel: "gpt-6.2-sol" } };
     const log = new Logger("error", undefined, false);
     const bridge = new BridgeModel(cfg, log);
-    expect(bridge.providerForModel("gpt-6.1-sol")).toBe("aio_gateway");
-    expect(bridge.isTextOnly("gpt-6.1-sol")).toBe(false);
+    expect(bridge.providerForModel("gpt-6.2-sol")).toBe("aio_gateway");
+    expect(bridge.isTextOnly("gpt-6.2-sol")).toBe(false);
     expect(bridge.modelEntries()[0]?.inputModalities).toEqual(["text", "image"]);
 
     const db = openDb(":memory:");
@@ -304,12 +304,12 @@ describe("A member assigned GPT", () => {
     await member.init();
     const off = new AgentManager({ cfg: { ...cfg, hostCodex: { ...cfg.hostCodex, enabled: false } }, db, log, codex: new FakeCodex(), bridge });
     try {
-      expect(member.memberSettings()).toEqual({ model: "gpt-6.1-sol", effort: "high" });
+      expect(member.memberSettings()).toEqual({ model: "gpt-6.2-sol", effort: "high" });
       const conv = member.createConversation({ ownerId: "user_g", title: "member" });
       member.submitTurn({ conversationId: conv.id, text: "hi", clientMessageId: "g1", model: "gpt-6-astra", effort: "max" });
       await tick();
       expect(codex.threadProviders.get(codex.startedThreads[0]!.threadId)).toBe("aio_gateway");
-      expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.1-sol", effort: "high" });
+      expect(codex.startedTurns[0]).toMatchObject({ model: "gpt-6.2-sol", effort: "high" });
       expect(() => off.memberSettings()).toThrow("temporarily unavailable");
     } finally {
       member.shutdown();

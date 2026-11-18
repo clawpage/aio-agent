@@ -41,7 +41,7 @@ const full = (days: number): AnalyticsReport => ({
     restoreAccounts: [{ username: 'cr', count: 2 }, { username: 'yzmy', count: 1 }], restoreReasons: { mcp_unready: 2, deadline: 1 } },
   boot: [{ platform: 'ios', opens: 12, cached: 9, times: { ttfb: { p50: 30, p90: 900 }, dom: { p50: 400, p90: 1600 }, version: { p50: 600, p90: 1900 }, session: { p50: 650, p90: 2000 }, feed: { p50: 1100, p90: 3200 }, cover: { p50: 2800, p90: 5600 } } }],
   accounts: [
-    { id: 'owner_1', username: 'owner', role: 'owner', createdAt: Date.UTC(2026, 0, 1), lastSeenAt: Date.UTC(2026, 9, 13, 16, 30), activeDays: 28, sessions: 30, tasks: 20, completed: 18, failed: 1, platforms: ['mac', 'web'], model: 'gpt-6.1-sol' },
+    { id: 'owner_1', username: 'owner', role: 'owner', createdAt: Date.UTC(2026, 0, 1), lastSeenAt: Date.UTC(2026, 9, 13, 16, 30), activeDays: 28, sessions: 30, tasks: 20, completed: 18, failed: 1, platforms: ['mac', 'web'], model: 'gpt-6.2-sol' },
     { id: 'm', username: 'yzmy', role: 'member', createdAt: Date.UTC(2026, 8, 22), lastSeenAt: Date.UTC(2026, 9, 13, 20, 5), activeDays: 12, sessions: 22, tasks: 15, completed: 10, failed: 2, platforms: ['android', 'web'], model: 'claude-sonnet-5.5' },
     { id: 'c', username: 'cr', role: 'member', createdAt: Date.UTC(2026, 9, 12), lastSeenAt: null, activeDays: 0, sessions: 0, tasks: 0, completed: 0, failed: 0, platforms: [], model: null },
   ],
@@ -56,7 +56,7 @@ const usage = (days: number): UsageReport => {
     // The member is costed at Sol (2,000,000 − 50 at $2, 50 cached at $0.10, 10 out at $10 per million: $4.0001 a day); the owner's model has no price.
     days: dates.map(date => ({ date, input: n, output: 10, cached: 50, cacheWrite: 0, total: n + 10, usd: username === 'owner' ? null : 4.0001 })),
     totals: { input: n * days, output: 10 * days, cached: 50 * days, cacheWrite: 0, total: (n + 10) * days, usd: username === 'owner' ? null : 4.0001 * days },
-    model: username === 'owner' ? 'claude-opus-5-5' : 'gpt-6.1-sol',
+    model: username === 'owner' ? 'claude-opus-5-5' : 'gpt-6.2-sol',
     quota: username === 'owner' ? null : { limit: 100_000_000, used: 37_000_000, resetsAt: Date.UTC(2026, 9, 14, 9), exceeded: false },
   })) };
 };
