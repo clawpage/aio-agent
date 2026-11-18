@@ -1627,7 +1627,7 @@ if __name__ == "__main__":
 
 export const GRAPHIC_SKILL_MD = `---
 name: aio-graphic
-description: Make images whose content is mainly text or layout (tables, schedules, meal or study plans, checklists, timetables, menus, infographics, certificates, text-heavy posters) by writing an HTML page and rendering it to a PNG. Use whenever such an image is created or changed, including a one-word edit.
+description: Make images whose content is mainly text or layout (tables, schedules, meal or study plans, checklists, timetables, menus, recipe cards, infographics, certificates, text-heavy posters) by writing an HTML page and rendering it to a PNG. Use whenever such an image is created or changed, including a one-word edit.
 ---
 
 # Text and layout images: HTML, rendered to PNG
@@ -1642,6 +1642,36 @@ description: Make images whose content is mainly text or layout (tables, schedul
   Reuse those files when the page changes; generate an asset again only when the drawing itself has to change.
   Simple icons (foods, objects, weather) can be emoji instead: Noto Color Emoji is installed and renders crisply.
 - Never paint text onto a PNG with Pillow or similar. Change the HTML and render again.
+
+## Design: a finished graphic, not a styled note
+
+Before writing HTML, decide which of two kinds of image this is.
+
+- **A working sheet** (timetable, checklist, plan, table): clean type, clear grid, a few emoji or icons. No photos needed.
+- **A showpiece** (recipe card, product or travel sheet, poster, guide, invitation, anything about real things the reader wants to see,
+  or anything the user will show to other people): it needs pictures of those things and a designed layout. A colored header
+  with paragraphs and a numbered list under it is a draft of such a page, not the page.
+
+**A reference image from the user sets the standard.** Look at it closely first and write down what it is made of: the sections and
+their order, where the main picture sits, which items have their own picture (each ingredient, each step, each product), the fact
+badges and stickers, the palette, how much fits on the page. Build every one of those into your page with the new content.
+Take its structure and richness, never its text or pictures; delivering fewer kinds of elements than the reference has
+(for example text where it shows photos) is not done yet. Without a reference, aim for what a good magazine or brand would publish.
+
+For a showpiece:
+
+- **Pictures carry it.** Generate one main picture of the finished result (large, appetizing or attractive, shown as the content
+  describes it: the real shape, color, count and doneness), and a small picture for each main item and each step, as separate
+  image_generate calls (\`fast: true\` suits the small ones). Six to twelve pictures on one card is normal. Keep one look across the set:
+  say the same style, light, angle and background in every prompt (e.g. "realistic food photo, soft daylight, top view, plain white
+  background"). No text inside the generated pictures; every word is HTML.
+- **Use the whole width.** Several panels side by side instead of one column: a title strip (name, one line on who it is for and why
+  it is good, a highlight sticker), the items as a row of 3-5 picture tiles with name and amount under each, the steps as numbered picture
+  tiles joined by arrows, and a side column of fact badges (portion, count, temperature, time, storage) each with an icon.
+- **Short text only.** Labels, amounts and numbers, the amounts and key numbers in bold; a step is one or two short lines. Details
+  that need sentences go in your reply, not on the card. Notes such as "no salt, no sugar" are check-mark chips.
+- **One palette.** Two or three colors taken from the subject, on a light background; section names as colored pills; rounded
+  panels with thin borders or soft shadows; the same radius and spacing everywhere.
 
 ## Files
 
@@ -1671,6 +1701,8 @@ python3 /home/gem/.codex/tools/aio-graphic/aio-render.py /home/gem/workspace/tas
 ## Checking and delivery
 
 Look at the PNG once (view_image) before delivering, and fix the HTML if anything overflows, wraps badly or is cut off.
+For a showpiece, also judge it as its reader would, next to the reference when there is one: if it looks plainer, emptier or more
+like a document than the reference, add what is missing and render again.
 Show it in your reply with ![description](path to the png). The HTML stays in the folder for the next change; do not mention it unless the user asks.
 `;
 

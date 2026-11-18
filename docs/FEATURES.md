@@ -793,6 +793,8 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
   反复改字会越改越糊、字越改越错。执行器按沙箱 skill `aio-graphic` 写 HTML 页面（`tasks/<任务>/<名字>.html` + `assets/`），
   用 `~/.codex/tools/aio-graphic/aio-render.py` 以沙箱内无头 Chromium 渲染成 2 倍 PNG；改图就改 HTML 再渲染。
   `image_generate` 只画其中的插画素材，每张生成一次后重复使用。skill 与渲染脚本随沙箱启动写入（同分享 skill）。
+  skill 把图分成两类：工作表（课表、清单、计划）只要排版干净；展示图（菜谱卡、商品/旅行介绍、海报、指南）必须有成品主图、每样材料和每个步骤的配图、
+  多栏版面和要点徽章。用户给了参考图时以它为标准：先拆出它的版块、配图和配色，再用新内容逐项做齐，元素种类不能比参考图少。
 - **真人照片修图**（修图、P 图、精修、专业修图、调亮调色、通透、天空过曝、磨皮、肤色、摄影棚效果、背景布平整、换背景）**不用** `image_generate`：它会把整张照片重画，
   脸、皮肤、手和头发变成"像但不是本人"，在 AI 结果上再改还会越改越失真、脸上出色块。执行器按所有账号内置的沙箱 skill `aio-photo` 处理，
   工具 `~/.codex/tools/aio-photo/aio-photo.py`（skill 与工具随沙箱启动写入，所有账号同一份；沙箱里改动 skill 会在下次启动时被覆盖，长期规则要改源码）：
