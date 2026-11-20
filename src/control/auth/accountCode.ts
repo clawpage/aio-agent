@@ -6,13 +6,13 @@ import { CODE_TTL_MS, MAX_ATTEMPTS, RESEND_AFTER_MS, SENDS_PER_IP_HOUR, compose,
 
 /**
  * The code a signed-in account gives back to change its password, emailed to the
- * account's email. An account from before email (it has only the hidden
- * placeholder) first binds one: the same kind of code, emailed to the address it
- * wants. The rules are the signup code's (signupCode.ts): a salted hash only, 10
+ * account's email ("password"). An account from before email (it has only the
+ * hidden placeholder) names one in the same form and gets the code there ("bind"):
+ * the change binds that email too. The rules are the signup code's (signupCode.ts): a salted hash only, 10
  * minutes, 5 tries, one email a minute for each account and purpose, a few an
  * hour for an IP address.
  *
- * Binding never tells whether an address already has an account: it is answered
+ * A "bind" code never tells whether an address already has an account: it is answered
  * "sent" too and gets a notice instead of a code, and the row holds the hash of a
  * code nobody was told.
  */

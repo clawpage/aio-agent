@@ -20,18 +20,15 @@ async function member(page: Page, email: string | null) {
   await page.route("**/api/auth/session", (r) => r.fulfill({ json: { authenticated: true, username: "lin", role: "member", email } }));
   const state = { email };
   const calls: Array<{ path: string; body: Record<string, string> }> = [];
-  await page.route((url) => /^\/api\/account\/(security|email|password)(\/code)?$/.test(url.pathname), async (r) => {
+  await page.route((url) => /^\/api\/account\/(security|password)(\/code)?$/.test(url.pathname), async (r) => {
     const path = new URL(r.request().url()).pathname;
     if (r.request().method() === "GET") return r.fulfill({ json: { available: true, email: state.email, minPassword: 12 } });
     const body = (r.request().postDataJSON() ?? {}) as Record<string, string>;
     calls.push({ path, body });
     if (path.endsWith("/code")) return r.fulfill({ json: { ok: true, retryAfter: 60 } });
-    if (path === "/api/account/email") {
-      if (body.code !== "123456") return r.fulfill({ status: 400, json: { error: "email_code_invalid", message: "验证码不正确" } });
-      state.email = body.email!;
-      return r.fulfill({ json: { ok: true, email: body.email } });
-    }
-    return r.fulfill({ json: { ok: true } });
+    if (body.code !== "123456") return r.fulfill({ status: 400, json: { error: "email_code_invalid", message: "验证码不正确" } });
+    state.email ??= body.email!;
+    return r.fulfill({ json: { ok: true, email: state.email } });
   });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   await page.goto("/u/lin/settings");
@@ -40,34 +37,41 @@ async function member(page: Page, email: string | null) {
   return { calls, card: page.getByRole("region", { name: "邮箱与密码" }) };
 }
 
-test("an account from before email binds one with a code, then the password form appears", async ({ page }, info) => {
+test("an account from before email enters one in the same form; the change binds it", async ({ page }, info) => {
   await page.clock.install();
   const { calls, card } = await member(page, null);
   await expect(card.getByText("这个账号还没有绑定邮箱", { exact: false })).toBeVisible();
-  await expect(card.getByLabel("新密码", { exact: true })).toHaveCount(0);
   const send = card.getByRole("button", { name: "发送验证码" });
-  const bind = card.getByRole("button", { name: "绑定邮箱" });
+  const change = card.getByRole("button", { name: "修改密码" });
   await expect(send).toBeDisabled();
   await card.getByLabel("邮箱", { exact: true }).fill("lin@example.com");
+  await card.getByLabel("新密码", { exact: true }).fill("brand-new-password");
+  await card.getByLabel("确认新密码").fill("brand-new-password");
   await send.click();
   await expect(card.getByText("验证码已发到 lin@example.com", { exact: false })).toBeVisible();
   await expect(card.getByRole("button", { name: "60 秒后重发" })).toBeDisabled();
-  await shoot(page, info, "bind");
-  await expect(bind).toBeDisabled();
   await card.getByLabel("邮箱验证码").fill("12 34 5");
   await expect(card.getByLabel("邮箱验证码")).toHaveValue("12345");
-  await expect(bind).toBeDisabled();
-  // The server's refusal is shown as written.
+  await expect(change).toBeDisabled();
+  // The code fits the address it went to: changing the address asks for a new one.
   await card.getByLabel("邮箱验证码").fill("654321");
-  await bind.click();
+  await card.getByLabel("邮箱", { exact: true }).fill("lin2@example.com");
+  await expect(change).toBeDisabled();
+  await card.getByLabel("邮箱", { exact: true }).fill("lin@example.com");
+  await shoot(page, info, "bind");
+  // The server's refusal is shown as written.
+  await change.click();
   await expect(card.getByRole("alert")).toHaveText("验证码不正确");
   await card.getByLabel("邮箱验证码").fill("123456");
-  await bind.click();
-  await expect(card.getByText("邮箱已绑定，现在可以修改密码了。")).toBeVisible();
+  await change.click();
+  await expect(card.getByText("密码已修改，邮箱已绑定，其他设备上的登录已退出。")).toBeVisible();
   await expect(card.getByText("已绑定邮箱：lin@example.com")).toBeVisible();
-  await expect(card.getByLabel("新密码", { exact: true })).toBeVisible();
-  expect(calls.map((c) => c.path)).toEqual(["/api/account/email/code", "/api/account/email", "/api/account/email"]);
-  expect(calls.at(-1)!.body).toEqual({ email: "lin@example.com", code: "123456" });
+  await expect(card.getByLabel("邮箱", { exact: true })).toHaveCount(0);
+  expect(calls).toEqual([
+    { path: "/api/account/password/code", body: { email: "lin@example.com" } },
+    { path: "/api/account/password", body: { password: "brand-new-password", code: "654321", email: "lin@example.com" } },
+    { path: "/api/account/password", body: { password: "brand-new-password", code: "123456", email: "lin@example.com" } },
+  ]);
 });
 
 test("changes the password with the emailed code", async ({ page }, info) => {

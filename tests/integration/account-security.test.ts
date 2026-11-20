@@ -33,50 +33,50 @@ async function signIn(harness: TestHarness, identifier: string, password: string
 beforeAll(async () => {
   h = await startHarness({ PA_TRUST_CF_CONNECTING_IP: "1" }, { mailer });
   off = await startHarness({ PA_TRUST_CF_CONNECTING_IP: "1" });
+  // As in production: a member's other requests go to its own runtime, which sends no email.
+  h.ctx.runtimeForUser = async (id) => (id === "owner_1" ? h.ctx : off.ctx);
 });
 afterAll(async () => { await h?.shutdown(); await off?.shutdown(); });
 
-it("makes an account from before email bind one with a code before it can change the password", async () => {
+it("binds the email an account from before email enters, together with the new password", async () => {
   await createMember(h.ctx.db, "oldtimer", "member-password-123");
   const a = await signIn(h, "oldtimer", "member-password-123");
   expect(await (await a.call("/api/account/security")).json()).toEqual({ available: true, email: null, minPassword: 12 });
-  // No email yet: no password code.
-  const early = await a.call("/api/account/password/code", {});
-  expect(early.status).toBe(409);
-  expect(await early.json()).toMatchObject({ error: "email_required", message: "请先绑定邮箱，再修改密码" });
+  // Without an email there is nowhere to send the code.
+  expect(await (await a.call("/api/account/password/code", {})).json()).toMatchObject({ error: "invalid_email" });
 
-  expect((await a.call("/api/account/email/code", { email: "Old.Timer@Example.com" })).status).toBe(200);
+  expect((await a.call("/api/account/password/code", { email: "Old.Timer@Example.com" })).status).toBe(200);
   const mail = mailer.sent.at(-1)!;
   const code = lastCode();
   expect(mail).toMatchObject({ to: "old.timer@example.com", subject: `一站验证码：${code}` });
-  expect(mail.text).toContain("绑定到一站账号");
+  expect(mail.text).toContain("绑定这个邮箱并修改登录密码");
   // The code fits only the address it was sent to.
-  expect((await a.call("/api/account/email", { email: "other@example.com", code })).status).toBe(400);
-  const bound = await a.call("/api/account/email", { email: "old.timer@example.com", code });
-  expect(bound.status).toBe(200);
-  expect(await bound.json()).toEqual({ ok: true, email: "old.timer@example.com" });
+  expect(await (await a.call("/api/account/password", { email: "other@example.com", password: "brand-new-password-456", code })).json()).toMatchObject({ error: "email_code_invalid" });
+  const changed = await a.call("/api/account/password", { email: "old.timer@example.com", password: "brand-new-password-456", code });
+  expect(changed.status).toBe(200);
+  expect(await changed.json()).toEqual({ ok: true, email: "old.timer@example.com" });
   expect(await (await a.call("/api/auth/session")).json()).toMatchObject({ email: "old.timer@example.com" });
-  // Once is enough, and the email signs in from now on.
-  expect((await a.call("/api/account/email/code", { email: "again@example.com" })).status).toBe(409);
-  await signIn(h, "old.timer@example.com", "member-password-123");
+  expect(await (await a.call("/api/account/security")).json()).toMatchObject({ email: "old.timer@example.com" });
+  // The email and the new password sign in from now on.
+  await signIn(h, "old.timer@example.com", "brand-new-password-456");
 });
 
-it("answers binding an address that has an account the same way, with a notice and no code", async () => {
+it("answers a code for an address that has an account the same way, with a notice and no code", async () => {
   await createMember(h.ctx.db, "second", "member-password-123");
   h.ctx.db.prepare("UPDATE owners SET email='taken@example.com',email_placeholder=0 WHERE username='second'").run();
   await createMember(h.ctx.db, "third", "member-password-123");
   const a = await signIn(h, "third", "member-password-123");
-  const res = await a.call("/api/account/email/code", { email: "taken@example.com" });
+  const res = await a.call("/api/account/password/code", { email: "taken@example.com" });
   expect(res.status).toBe(200);
   expect(await res.json()).toEqual({ ok: true, retryAfter: 60 });
   const mail = mailer.sent.at(-1)!;
   expect(mail.to).toBe("taken@example.com");
   expect(mail.subject).not.toMatch(/\d{6}/);
   expect(mail.text).not.toMatch(/\d{6}/);
-  // No code that would work was told to anybody.
-  const tries = await a.call("/api/account/email", { email: "taken@example.com", code: "000000" });
-  expect(tries.status).toBe(400);
+  // No code that would work was told to anybody, and nothing changed.
+  expect((await a.call("/api/account/password", { email: "taken@example.com", password: "brand-new-password-456", code: "000000" })).status).toBe(400);
   expect(h.ctx.db.prepare("SELECT email_placeholder FROM owners WHERE username='third'").get()).toMatchObject({ email_placeholder: 1 });
+  await signIn(h, "third", "member-password-123");
 });
 
 it("changes the password with the code emailed to the account, signs the other logins out, keeps this one", async () => {
@@ -97,6 +97,7 @@ it("changes the password with the code emailed to the account, signs the other l
   expect(await (await a.call("/api/account/password", { password: "short", code })).json()).toMatchObject({ error: "weak_password" });
   const changed = await a.call("/api/account/password", { password: "brand-new-password-456", code });
   expect(changed.status).toBe(200);
+  expect(await changed.json()).toEqual({ ok: true, email: "changer@example.com" });
   expect(await (await a.call("/api/auth/session")).json()).toMatchObject({ authenticated: true });
   expect(await (await other.call("/api/auth/session")).json()).toMatchObject({ authenticated: false });
   // The old password is gone, the new one works, and the code went with the change.
@@ -127,10 +128,10 @@ it("needs a signed-in member, the CSRF token, and a deployment that sends email"
   expect(refused.status).toBe(403);
   await createMember(h.ctx.db, "nocsrf", "member-password-123");
   const a = await signIn(h, "nocsrf", "member-password-123");
-  expect((await h.request("/api/account/email/code", { method: "POST", headers: { ...json, cookie: a.cookie, "cf-connecting-ip": a.ip }, body: JSON.stringify({ email: "x@example.com" }) })).status).toBe(403);
+  expect((await h.request("/api/account/password/code", { method: "POST", headers: { ...json, cookie: a.cookie, "cf-connecting-ip": a.ip }, body: JSON.stringify({ email: "x@example.com" }) })).status).toBe(403);
 
   await createMember(off.ctx.db, "nomail", "member-password-123");
   const b = await signIn(off, "nomail", "member-password-123");
   expect(await (await b.call("/api/account/security")).json()).toMatchObject({ available: false });
-  expect((await b.call("/api/account/email/code", { email: "x@example.com" })).status).toBe(404);
+  expect((await b.call("/api/account/password/code", { email: "x@example.com" })).status).toBe(404);
 });

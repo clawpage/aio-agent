@@ -58,16 +58,14 @@ export const http: typeof zh = {
     takenBody: "このメールアドレスで Clawpage Agent への登録が申し込まれましたが、すでにアカウントがあるため、登録は不要です。",
     takenSignIn: "そのままログインしてください。メールアドレスとパスワード、または登録時に使った Google や Apple でログインできます。",
   },
-  /** Binding an email and changing the password from the settings (src/control/auth/accountCode.ts). */
+  /** Changing the password from the settings (src/control/auth/accountCode.ts). */
   account: {
     ownerManaged: "オーナーのパスワードはデプロイ設定で管理されており、ここでは変更できません",
-    emailRequired: "パスワードを変更する前に、メールアドレスを登録してください",
-    emailBound: "このアカウントにはすでにメールアドレスが登録されています",
   },
   /** The emails with those codes, and the notice to an address that already belongs to another account (no code then). */
   accountMail: {
     password: { subject: (code: string) => `Clawpage Agent 確認コード：${code}`, intro: "Clawpage Agent のパスワードを変更しようとしています。確認コードは次のとおりです：", ignore: "お心当たりがない場合は、このメールを無視してください。パスワードは変更されません。" },
-    bind: { subject: (code: string) => `Clawpage Agent 確認コード：${code}`, intro: "このメールアドレスを Clawpage Agent のアカウントに登録しようとしています。確認コードは次のとおりです：", ignore: "お心当たりがない場合は、このメールを無視してください。" },
+    bind: { subject: (code: string) => `Clawpage Agent 確認コード：${code}`, intro: "このメールアドレスを Clawpage Agent のアカウントに登録し、パスワードを変更しようとしています。確認コードは次のとおりです：", ignore: "お心当たりがない場合は、このメールを無視してください。" },
     bindTaken: { subject: "Clawpage Agent：このメールアドレスにはアカウントがあります", body: "このメールアドレスを Clawpage Agent のアカウントに登録する申し込みがありましたが、すでに別のアカウントのメールアドレスのため、登録されませんでした。" },
   },
   session: {

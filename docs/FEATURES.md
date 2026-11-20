@@ -320,13 +320,13 @@ owner 在配置「用户支持」下的「回复反馈」看最近 200 条（账
   - 没配 key（自托管默认）时照旧不要验证码，`/api/auth/session` 的 `emailCode: false` 让注册页不显示这一步，`/api/auth/register/code` 返回 404，控制面启动时日志警告一次。
 - **邮箱与密码**（配置 →「邮箱与密码」，`src/control/auth/accountCode.ts`、`src/ui/src/components/SecuritySettings.tsx`）：member 在配置页凭邮箱验证码改密码；只在配了 Resend key 时可用
   （`GET /api/account/security` 回 `available`、可见邮箱 `email`、`minPassword`；没配 key 时页面说「暂时不能在这里修改密码」，其余接口 404）。owner 的密码属于部署（`PA_OWNER_PASSWORD` / owner-secret），
-  配置页没有这一项，接口回 403 `owner_managed`。接口都要会话 + CSRF。
-  - 没有邮箱的老账号（只有隐藏占位邮箱）必须先绑定：`POST /api/account/email/code {email}` 发码到要绑定的地址，`POST /api/account/email {email, code}` 核对后把它写成账号邮箱、
-    清掉占位标记，之后也能用这个邮箱登录。码只对发往的那个地址有效。已绑定的账号再调回 409 `email_bound`；没邮箱时请求改密码回 409 `email_required`。
-    绑定也不暴露邮箱是否已被别的账号使用：已被占用的地址同样回「已发送」，收到「这个邮箱已经是另一个账号的邮箱，没有绑定」的提醒而不是码，库里存一个谁也不知道的码的哈希。
-  - 改密码：`POST /api/account/password/code` 把码发到账号邮箱，`POST /api/account/password {password, code}`；新密码至少 12 位（太短在核对验证码之前就拒绝，不耗尝试次数）。
-    成功后本次登录保留，账号其他登录（含其工作区会话）全部退出，审计 `account_password_changed`。
-  - 码的规则同注册验证码：6 位数字，只存加盐哈希（中央库 `account_codes`，每账号每用途一行，用途 `bind` / `password` 互不通用），10 分钟过期，5 次尝试，成功即删；
+  配置页没有这一项，接口回 403 `owner_managed`。接口都要会话 + CSRF，由根路由处理（账号表在中央库；member 的其他请求进各自的运行时，那里不发信）。
+  - 一张表单：新密码、确认、验证码。`POST /api/account/password/code` 把码发到账号邮箱，`POST /api/account/password {password, code}` 完成修改，回 `{ok, email}`；
+    新密码至少 12 位（太短在核对验证码之前就拒绝，不耗尝试次数）。成功后本次登录保留，账号其他登录（含其工作区会话）全部退出，审计 `account_password_changed`。
+  - 没有邮箱的老账号（只有隐藏占位邮箱）在同一张表单里多填一个邮箱：两个接口都带 `email`，码发到这个地址，改密码的同一事务里把它写成账号邮箱、清掉占位标记，
+    之后也能用它登录。码只对发往的那个地址有效；不填邮箱回 400 `invalid_email`。不暴露邮箱是否已被别的账号使用：已被占用的地址同样回「已发送」，
+    收到「这个邮箱已经是另一个账号的邮箱，没有绑定」的提醒而不是码，库里存一个谁也不知道的码的哈希。
+  - 码的规则同注册验证码：6 位数字，只存加盐哈希（中央库 `account_codes`，每账号每用途一行：有邮箱的 `password`、顺带绑定的 `bind`，互不通用），10 分钟过期，5 次尝试，成功即删；
     同账号同用途 60 秒一封，同 IP 每小时 10 封，错误码与文案沿用注册验证码的 `email_code_*`。邮件按控制台语言写，五种语言。
 - **注册**：登录页切换到注册（或打开 `/register`），填邮箱和密码（至少 12 位）；也可用 Google 首次认证，直接以 Google 邮箱为账号邮箱
   （该邮箱已被密码账号注册时拒绝，不自动关联）。近 30 天活跃账户不足 30 个时免邀请码，达到 30 个后必须填写邀请码（`activeAccounts`，`src/control/auth/invites.ts`）。活跃 = 近 30 天（滚动 30×24 小时）内注册，或有本人使用产品的事件（与运营报表同一口径：不含执行器自己的工具使用、定时任务、他人访问分享页等被动事件）；owner、管理员创建的成员与审核账户同样按是否活跃计入，30 天没人用的账户让出名额。人数检查、邀请码领用与建号在同一写事务内，跨密码/Google 的并发注册不能超出免邀请码名额。

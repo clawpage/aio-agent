@@ -195,8 +195,9 @@ export function createApp(ctx: AppContext): express.Express {
       if(!api){api=createApiRouter({...ctx,cfg:workspaceConfig(ctx.cfg)});workspaceApis.set(account,api);}
       api(req,res,next);return;
     }
+    // Changing the password (account/security, account/password) works on the central accounts table.
     // Voice input (asr) is one speech server and the owner's polishing model for every signed-in account, never a member's own runtime.
-    if(!id || !ctx.runtimeForUser || /^\/(auth|workspace|usage|support|analytics|clawpage-sso|profile|asr)(\/|$)/i.test(req.path) || /^\/settings\/support(\/|$)/i.test(req.path)) {rootApi(req,res,next);return;}
+    if(!id || !ctx.runtimeForUser || /^\/(auth|workspace|usage|support|analytics|clawpage-sso|profile|asr)(\/|$)/i.test(req.path) || /^\/settings\/support(\/|$)/i.test(req.path) || /^\/account\/(security|password)(\/|$)/i.test(req.path)) {rootApi(req,res,next);return;}
     try {
       const runtime=await ctx.runtimeForUser(id);
       if(!ctx.sessions.isLive(req.paCtx!.session!.id)){res.status(401).json({error:"unauthenticated"});return;}
