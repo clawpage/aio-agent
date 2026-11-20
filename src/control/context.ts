@@ -31,6 +31,7 @@ import type { Analytics } from "./analytics.js";
 import type { TaskKbMaintainer } from "./taskKb/maintainer.js";
 import type { SharedKbs } from "./taskKb/shared.js";
 import type { SignupCodes } from "./auth/signupCode.js";
+import type { AccountCodes } from "./auth/accountCode.js";
 
 export interface AppContext {
   runtimeForUser?: (userId: string) => Promise<AppContext>;
@@ -38,6 +39,8 @@ export interface AppContext {
   share?: ShareStore;
   /** The code emailed before a password registration; absent without a Resend key (registration then asks for none). */
   signupCodes?: SignupCodes;
+  /** Codes for binding an email and changing the password; absent like `signupCodes` without a Resend key. */
+  accountCodes?: AccountCodes;
   /** Jev structured decisions (host-side key; absent without one). */
   jev?: Jev;
   tasks: TaskService;

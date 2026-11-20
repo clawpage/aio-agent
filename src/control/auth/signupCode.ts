@@ -43,8 +43,8 @@ export class ResendMailer implements Mailer {
   }
 }
 
-const hash = (salt: string, code: string) => createHash("sha256").update(`${salt}:${code}`).digest("hex");
-const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+export const hash = (salt: string, code: string) => createHash("sha256").update(`${salt}:${code}`).digest("hex");
+export const same = (a: string, b: string) => a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
 /** `Name <address>` as configured, or the product's name in the request's language before a bare address. */
 export function sender(from: string): string {
@@ -54,7 +54,7 @@ export function sender(from: string): string {
 const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /** Plain text and the same words in simple HTML, in the request's language. */
-function compose(from: string, to: string, subject: string, paragraphs: string[], code?: string): Mail {
+export function compose(from: string, to: string, subject: string, paragraphs: string[], code?: string): Mail {
   const m = t().http.signupMail;
   const text = [paragraphs[0]!, ...(code ? [code] : []), ...paragraphs.slice(1)].join("\n\n");
   const p = (s: string) => `<p style="margin:0 0 16px;font-size:15px;line-height:1.6">${escapeHtml(s)}</p>`;

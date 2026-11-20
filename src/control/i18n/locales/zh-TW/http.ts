@@ -58,6 +58,18 @@ export const http: typeof zh = {
     takenBody: "有人用這個電子郵件申請註冊一站，但它已經有帳號了，不需要再註冊。",
     takenSignIn: "直接登入即可：可以用電子郵件和密碼，或是註冊時用的 Google／透過 Apple 登入。",
   },
+  /** Binding an email and changing the password from the settings (src/control/auth/accountCode.ts). */
+  account: {
+    ownerManaged: "擁有者的密碼由部署設定管理，無法在這裡修改",
+    emailRequired: "請先綁定電子郵件，再修改密碼",
+    emailBound: "這個帳號已經綁定了電子郵件",
+  },
+  /** The emails with those codes, and the notice to an address that already belongs to another account (no code then). */
+  accountMail: {
+    password: { subject: (code: string) => `一站驗證碼：${code}`, intro: "你正在修改一站的登入密碼，電子郵件驗證碼是：", ignore: "如果不是你本人操作，請忽略這封郵件，密碼不會改變。" },
+    bind: { subject: (code: string) => `一站驗證碼：${code}`, intro: "你正在把這個電子郵件綁定到一站帳號，電子郵件驗證碼是：", ignore: "如果不是你本人操作，忽略這封郵件即可。" },
+    bindTaken: { subject: "一站：這個電子郵件已有帳號", body: "有人想把這個電子郵件綁定到一站帳號，但它已經是另一個帳號的電子郵件，所以沒有綁定。" },
+  },
   session: {
     expired: "工作階段已過期",
     revoked: "已登出",

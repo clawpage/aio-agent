@@ -497,6 +497,15 @@ pre {
 .invite-main span { overflow-wrap: anywhere; }
 .invite-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 @media (max-width: 480px) { .invite-new { flex-direction: column; } }
+.security-form { display: grid; gap: 16px; }
+.security-form > p.tiny { margin: -8px 0 0; line-height: 1.6; }
+.security-form .field > label { font-size: 12px; color: var(--text-dim); }
+.security-code-row { display: flex; gap: 8px; }
+.security-code-row > input { flex: 1; min-width: 0; }
+.security-send-code { flex: none; min-width: 104px; color: var(--accent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.security-send-code:disabled { color: var(--text-dim); }
+input.security-code-input { font-family: var(--mono); letter-spacing: 0.3em; }
+input.security-code-input::placeholder { font-family: var(--font); letter-spacing: normal; }
 .settings-file-label { margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--text-dim); }
 .settings-fields { display: grid; gap: 18px; }
 .settings-card .banner { margin: 0; }

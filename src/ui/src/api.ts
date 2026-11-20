@@ -240,6 +240,13 @@ export const api = {
   // The console language travels with each message: the agents write for the person in it.
   submitTask: (body: { text: string; clientMessageId: string; attachments: Attachment[]; relatedTaskId: string | null }) => request<{ task: import("./types").Task; duplicate: boolean }>("/api/tasks", { method: "POST", body: { ...body, locale } }),
   // keepalive: the page reloads into the new language right away, and the request outlives it.
+  /** A member's email and password (Settings): whether the page works here, and the account's email (null: bind one first). */
+  accountSecurity: (signal?: AbortSignal) => request<{ available: boolean; email: string | null; minPassword: number }>("/api/account/security", { cache: "no-store", signal }),
+  /** `retryAfter` is in seconds, as with the registration code. */
+  sendBindCode: (email: string) => request<{ ok: boolean; retryAfter: number }>("/api/account/email/code", { method: "POST", body: { email } }),
+  bindEmail: (email: string, code: string) => request<{ ok: boolean; email: string }>("/api/account/email", { method: "POST", body: { email, code } }),
+  sendPasswordCode: () => request<{ ok: boolean; retryAfter: number }>("/api/account/password/code", { method: "POST", body: {} }),
+  changePassword: (password: string, code: string) => request<{ ok: boolean }>("/api/account/password", { method: "POST", body: { password, code } }),
   quota: () => request<{ limited: false } | { limited: true; percent: number; resetsAt: number }>("/api/account/quota", { cache: "no-store" }),
   setAccountLocale: (next: Locale) => request<{ ok: true }>("/api/account/locale", { method: "PUT", body: { locale: next }, keepalive: true }),
   /** The language this console opened in; the account takes it once, and never over a choice made in settings. */

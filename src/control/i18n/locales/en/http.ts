@@ -58,6 +58,18 @@ export const http: typeof zh = {
     takenBody: "Someone asked to sign up for Clawpage Agent with this email, but it already has an account, so there's nothing to register.",
     takenSignIn: "Just log in: with your email and password, or with Google or Apple if that's how you signed up.",
   },
+  /** Binding an email and changing the password from the settings (src/control/auth/accountCode.ts). */
+  account: {
+    ownerManaged: "The owner's password is set by the deployment and can't be changed here",
+    emailRequired: "Add an email to your account before changing the password",
+    emailBound: "This account already has an email",
+  },
+  /** The emails with those codes, and the notice to an address that already belongs to another account (no code then). */
+  accountMail: {
+    password: { subject: (code: string) => `Clawpage Agent verification code: ${code}`, intro: "You're changing your Clawpage Agent password. Your verification code is:", ignore: "If this wasn't you, ignore this email and your password stays the same." },
+    bind: { subject: (code: string) => `Clawpage Agent verification code: ${code}`, intro: "You're adding this email to your Clawpage Agent account. Your verification code is:", ignore: "If this wasn't you, you can ignore this email." },
+    bindTaken: { subject: "Clawpage Agent: this email already has an account", body: "Someone tried to add this email to a Clawpage Agent account, but it already belongs to another account, so nothing was changed." },
+  },
   session: {
     expired: "Your session has expired",
     revoked: "You've been logged out",

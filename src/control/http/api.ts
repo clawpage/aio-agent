@@ -37,10 +37,12 @@ import type { AgentEvent } from "../codex/manager.js";
 import type { HostKind, RequestContext } from "./security.js";
 import { UNSAFE_METHODS, guardUnsafe, originAllowed } from "./security.js";
 import { BOOTSTRAP_USERNAME, authenticateUser, getUser } from "../auth/owner.js";
-import { normalizeEmail, visibleEmail } from "../auth/email.js";
+import { emailTaken, normalizeEmail, visibleEmail } from "../auth/email.js";
+import { consumeAccountCode, verifyAccountCode } from "../auth/accountCode.js";
+import { hashPassword } from "../auth/passwords.js";
 import { CLIENT_EVENTS } from "../../common/analytics.js";
 import { fileKind } from "../analytics.js";
-import { RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
+import { MIN_PASSWORD, RegisterError, createInvite, listInvites, registerWithInvite, registrationRequiresInvite, revokeInvite } from "../auth/invites.js";
 import { googleRouter } from "../auth/googleRoutes.js";
 import { DEVICE_KINDS, type DeviceKind } from "../deviceLink.js";
 import { appleRouter } from "../auth/appleRoutes.js";
@@ -542,6 +544,91 @@ export function createApiRouter(context: AppContext): Router {
       });
     }),
   );
+
+  // ------------------------------------------------- account email and password
+  // A signed-in member changes the password with a code emailed to the account's email; an account
+  // that has only the hidden placeholder binds an email first (src/control/auth/accountCode.ts).
+  // The owner's password belongs to the deployment (auth/owner.ts), so the owner has none of this.
+
+  /** The member behind the session and the code sender, or the answer already given. */
+  const accountSecurity = (res: Response, ctx: RequestContext) => {
+    const user = getUser(db, ctx.session!.ownerId);
+    if (!context.accountCodes || !user) { res.status(404).json({ error: "not_found" }); return null; }
+    if (user.role === "owner") { res.status(403).json({ error: "owner_managed", message: t().http.account.ownerManaged }); return null; }
+    return { user, codes: context.accountCodes, email: visibleEmail(db, user.id) };
+  };
+  const answerSent = (res: Response, sent: Awaited<ReturnType<NonNullable<AppContext["accountCodes"]>["send"]>>) => {
+    if (sent.ok) { res.json({ ok: true, retryAfter: sent.retryAfter }); return; }
+    if (sent.retryAfter) res.setHeader("Retry-After", String(sent.retryAfter));
+    res.status(sent.status).json({ error: sent.error, message: sent.message, ...(sent.retryAfter ? { retryAfter: sent.retryAfter } : {}) });
+  };
+
+  router.get("/account/security", requireKind("primary"), requireSession, asyncHandler((_req, res, ctx) => {
+    const user = getUser(db, ctx.session!.ownerId);
+    res.json({ available: Boolean(context.accountCodes) && user?.role === "member", email: user ? visibleEmail(db, user.id) : null, minPassword: MIN_PASSWORD });
+  }));
+
+  router.post("/account/email/code", requireKind("primary"), requireSession, asyncHandler(async (req, res, ctx) => {
+    const a = accountSecurity(res, ctx);
+    if (!a) return;
+    if (a.email) { res.status(409).json({ error: "email_bound", message: t().http.account.emailBound }); return; }
+    const email = normalizeEmail(typeof req.body?.email === "string" ? req.body.email : "");
+    if (!email) { res.status(400).json({ error: "invalid_email", message: t().http.auth.invalidEmail }); return; }
+    answerSent(res, await a.codes.send(a.user.id, "bind", email, ctx.ip));
+  }));
+
+  router.post("/account/email", requireKind("primary"), requireSession, asyncHandler(async (req, res, ctx) => {
+    const a = accountSecurity(res, ctx);
+    if (!a) return;
+    if (a.email) { res.status(409).json({ error: "email_bound", message: t().http.account.emailBound }); return; }
+    const email = normalizeEmail(typeof req.body?.email === "string" ? req.body.email : "");
+    if (!email) { res.status(400).json({ error: "invalid_email", message: t().http.auth.invalidEmail }); return; }
+    const check = verifyAccountCode(db, a.user.id, "bind", email, typeof req.body?.code === "string" ? req.body.code : "");
+    if (!check.ok) { res.status(400).json({ error: `email_code_${check.reason}`, message: t().http.auth.emailCode[check.reason] }); return; }
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      // Only a race gets here with a taken address: one that was taken when asked got no code.
+      if (emailTaken(db, email) || !consumeAccountCode(db, a.user.id, "bind", check.hash)
+        || Number(db.prepare("UPDATE owners SET email=?,email_placeholder=0 WHERE id=? AND email_placeholder=1").run(email, a.user.id).changes) === 0) {
+        db.exec("ROLLBACK");
+        res.status(400).json({ error: "email_code_invalid", message: t().http.auth.emailCode.invalid });
+        return;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      try { db.exec("ROLLBACK"); } catch { /* already rolled back */ }
+      throw err;
+    }
+    audit(db, "account_email_bound", a.user.username, ctx.ip);
+    track(req, "account_email_bound");
+    res.json({ ok: true, email });
+  }));
+
+  router.post("/account/password/code", requireKind("primary"), requireSession, asyncHandler(async (_req, res, ctx) => {
+    const a = accountSecurity(res, ctx);
+    if (!a) return;
+    if (!a.email) { res.status(409).json({ error: "email_required", message: t().http.account.emailRequired }); return; }
+    answerSent(res, await a.codes.send(a.user.id, "password", a.email, ctx.ip));
+  }));
+
+  router.post("/account/password", requireKind("primary"), requireSession, asyncHandler(async (req, res, ctx) => {
+    const a = accountSecurity(res, ctx);
+    if (!a) return;
+    if (!a.email) { res.status(409).json({ error: "email_required", message: t().http.account.emailRequired }); return; }
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    // Before the code: a password that is too short does not spend one of its tries.
+    if (password.length < MIN_PASSWORD) { res.status(400).json({ error: "weak_password", message: t().http.auth.weakPassword(MIN_PASSWORD) }); return; }
+    const check = verifyAccountCode(db, a.user.id, "password", a.email, typeof req.body?.code === "string" ? req.body.code : "");
+    if (!check.ok) { res.status(400).json({ error: `email_code_${check.reason}`, message: t().http.auth.emailCode[check.reason] }); return; }
+    const rec = await hashPassword(password);
+    if (!consumeAccountCode(db, a.user.id, "password", check.hash)) { res.status(400).json({ error: "email_code_invalid", message: t().http.auth.emailCode.invalid }); return; }
+    db.prepare("UPDATE owners SET password_hash=?,password_salt=?,password_params=? WHERE id=?").run(rec.hash, rec.salt, rec.params, a.user.id);
+    // Every other login of the account ends; this one stays.
+    const revoked = sessions.revokeOthersForOwner(a.user.id, ctx.session!.id);
+    audit(db, "account_password_changed", `${a.user.username} sessions_revoked=${revoked}`, ctx.ip);
+    track(req, "account_password_changed");
+    res.json({ ok: true });
+  }));
 
   // The API version this control plane serves: a UI (web or packaged) built for another one says so.
   router.get("/version", (_req, res) => {

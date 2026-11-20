@@ -59,6 +59,18 @@ export const http = {
     takenBody: "有人用这个邮箱申请注册一站，但它已经有账号了，不需要再注册。",
     takenSignIn: "直接登录即可：可以用邮箱和密码，或者注册时用的 Google / 通过 Apple 登录。",
   },
+  /** Binding an email and changing the password from the settings (src/control/auth/accountCode.ts). */
+  account: {
+    ownerManaged: "所有者的密码由部署配置管理，不能在这里修改",
+    emailRequired: "请先绑定邮箱，再修改密码",
+    emailBound: "这个账号已经绑定了邮箱",
+  },
+  /** The emails with those codes, and the notice to an address that already belongs to another account (no code then). */
+  accountMail: {
+    password: { subject: (code: string) => `一站验证码：${code}`, intro: "你正在修改一站的登录密码，邮箱验证码是：", ignore: "如果不是你本人操作，请忽略这封邮件，密码不会改变。" },
+    bind: { subject: (code: string) => `一站验证码：${code}`, intro: "你正在把这个邮箱绑定到一站账号，邮箱验证码是：", ignore: "如果不是你本人操作，忽略这封邮件即可。" },
+    bindTaken: { subject: "一站：这个邮箱已有账号", body: "有人想把这个邮箱绑定到一站账号，但它已经是另一个账号的邮箱，所以没有绑定。" },
+  },
   session: {
     expired: "会话已过期",
     revoked: "会话已注销",

@@ -5,6 +5,7 @@ import { IphoneSettings, useIphoneEntry } from "./IphoneSettings";
 import { AndroidSettings, useAndroidEntry } from "./AndroidSettings";
 import { SettingsPages, type SettingsSection } from "./SettingsLayout";
 import { ProfileSettings } from "./ProfileSettings";
+import { SecuritySettings } from "./SecuritySettings";
 import type { Profile } from "../types";
 import { api } from "../api";
 import { InlineLoading } from "./Brand";
@@ -49,6 +50,7 @@ export function MemberSettings({ section, onOpen, onBack, onProfile, onLogout }:
     { id: "profile", title: t.profile.title, page: () => <ProfileSettings onSaved={onProfile}/> },
     ...(iphone ? [{ id: "iphone", title: t.app.iphone.label, page: () => <IphoneSettings/> }] : []),
     ...(android ? [{ id: "android", title: t.app.android.label, page: () => <AndroidSettings/> }] : []),
+    { id: "security", title: t.settings.security.title, page: () => <SecuritySettings/> },
     { id: "account", title: t.support.account, page: () => <AccountPrivacySettings/> },
   ];
   return <SettingsPages sections={sections} section={section} onOpen={onOpen} onBack={onBack} onLogout={onLogout} top={<QuotaSettings/>} switches={<><PushSettings/><LanguageSettings/></>}/>;

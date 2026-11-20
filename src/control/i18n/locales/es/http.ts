@@ -58,6 +58,18 @@ export const http: typeof zh = {
     takenBody: "Alguien ha pedido crear una cuenta en Clawpage Agent con este correo, pero ya tiene una, así que no hace falta registrarse.",
     takenSignIn: "Solo tienes que iniciar sesión: con tu correo y contraseña, o con Google o Apple si te registraste así.",
   },
+  /** Binding an email and changing the password from the settings (src/control/auth/accountCode.ts). */
+  account: {
+    ownerManaged: "La contraseña del propietario la fija el despliegue y no se puede cambiar aquí",
+    emailRequired: "Añade un correo a tu cuenta antes de cambiar la contraseña",
+    emailBound: "Esta cuenta ya tiene un correo",
+  },
+  /** The emails with those codes, and the notice to an address that already belongs to another account (no code then). */
+  accountMail: {
+    password: { subject: (code: string) => `Código de verificación de Clawpage Agent: ${code}`, intro: "Estás cambiando tu contraseña de Clawpage Agent. Tu código de verificación es:", ignore: "Si no has sido tú, ignora este correo y tu contraseña no cambiará." },
+    bind: { subject: (code: string) => `Código de verificación de Clawpage Agent: ${code}`, intro: "Estás añadiendo este correo a tu cuenta de Clawpage Agent. Tu código de verificación es:", ignore: "Si no has sido tú, puedes ignorar este correo." },
+    bindTaken: { subject: "Clawpage Agent: este correo ya tiene una cuenta", body: "Alguien ha intentado añadir este correo a una cuenta de Clawpage Agent, pero ya pertenece a otra cuenta, así que no se ha cambiado nada." },
+  },
   session: {
     expired: "Tu sesión ha caducado",
     revoked: "Se ha cerrado tu sesión",

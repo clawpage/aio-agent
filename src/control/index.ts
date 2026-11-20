@@ -8,6 +8,7 @@ import {ClawpageData} from "./clawpages.js";
 import {ClawpageAi} from "./clawpageAi.js";
 import {Jev} from "./jev.js";
 import { ResendMailer, SignupCodes, type Mailer } from "./auth/signupCode.js";
+import { AccountCodes } from "./auth/accountCode.js";
 import {DecisionGateway} from "./decision.js";
 import {KbGateway} from "./kb.js";
 import {HaGateway} from "./ha.js";
@@ -191,7 +192,7 @@ async function bootstrapRuntime(opts: BootstrapOptions, cfg: Config, log: Logger
   } : null));
   const ctx: AppContext = {
     jev,
-    ...(mailer ? { signupCodes: new SignupCodes(db, mailer, cfg.mailFrom, log) } : {}),
+    ...(mailer ? { signupCodes: new SignupCodes(db, mailer, cfg.mailFrom, log), accountCodes: new AccountCodes(db, mailer, cfg.mailFrom, log) } : {}),
     tasks,
     // Member runtimes record into the central database instead (UserRuntimes hands them the root's).
     ...(opts.skipOwner ? {} : { analytics: new Analytics(db, log) }),

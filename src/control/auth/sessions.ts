@@ -156,6 +156,14 @@ export class SessionStore {
     for (const r of rows) this.revoke(r.id, reason);
   }
 
+  /** Every other login of the account ends; `keepId` and the workspace sessions under it stay. */
+  revokeOthersForOwner(ownerId: string, keepId: string, reason = "password-changed"): number {
+    const rows = this.#db.prepare("SELECT id FROM sessions WHERE owner_id = ? AND revoked_at IS NULL AND id <> ? AND (parent_session_id IS NULL OR parent_session_id <> ?)")
+      .all(ownerId, keepId, keepId) as { id: string }[];
+    for (const r of rows) this.revoke(r.id, reason);
+    return rows.length;
+  }
+
   /** A session is live only while it is neither revoked nor expired. */
   isLive(sessionId: string, now = Date.now()): boolean {
     const row = this.#db.prepare("SELECT revoked_at, expires_at FROM sessions WHERE id = ?").get(sessionId) as

@@ -179,6 +179,19 @@ CREATE TABLE IF NOT EXISTS signup_codes (
   attempts INTEGER NOT NULL DEFAULT 0
 );
 
+-- The emailed code an account gives back to bind an email or change its password (src/control/auth/accountCode.ts); only its salted hash is kept.
+CREATE TABLE IF NOT EXISTS account_codes (
+  owner_id TEXT NOT NULL,
+  purpose TEXT NOT NULL CHECK (purpose IN ('bind','password')),
+  email TEXT NOT NULL,
+  code_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (owner_id, purpose)
+);
+
 -- Google subjects are stable identifiers; email never links or promotes an account.
 -- A Mac running the app, linked by its account to offer its USB phones (device tokens are stored hashed).
 CREATE TABLE IF NOT EXISTS device_links (
