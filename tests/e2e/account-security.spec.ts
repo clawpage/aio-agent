@@ -78,7 +78,11 @@ test("changes the password with the emailed code", async ({ page }, info) => {
   const { calls, card } = await member(page, "lin@example.com");
   await expect(card.getByText("已绑定邮箱：lin@example.com")).toBeVisible();
   const change = card.getByRole("button", { name: "修改密码" });
+  // Too short says so under the box, with how many characters are missing.
+  await card.getByLabel("新密码", { exact: true }).fill("abcdefghij");
+  await expect(card.getByText("密码至少需要 12 个字符，还差 2 个")).toBeVisible();
   await card.getByLabel("新密码", { exact: true }).fill("brand-new-password");
+  await expect(card.getByText("密码至少需要 12 个字符", { exact: false })).toHaveCount(0);
   await card.getByLabel("确认新密码").fill("brand-new-passwor");
   await expect(card.getByText("两次输入的密码不一样")).toBeVisible();
   await card.getByLabel("确认新密码").fill("brand-new-password");

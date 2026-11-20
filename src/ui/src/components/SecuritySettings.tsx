@@ -63,6 +63,8 @@ function ChangePassword({ email, minPassword, onBound }: { email: string | null;
     finally { setSending(false); }
   };
   const mismatch = confirm.length > 0 && confirm !== password;
+  /** Said as soon as it is typed: the placeholder with the rule is gone by then, and a grey button alone does not say why. */
+  const short = password.length > 0 && password.length < minPassword;
   const submit = async () => {
     setBusy(true); setError(null);
     try {
@@ -89,6 +91,7 @@ function ChangePassword({ email, minPassword, onBound }: { email: string | null;
         <input type="email" name="email" value={newEmail} onChange={(e) => edit(setNewEmail)(e.target.value)} autoComplete="email" placeholder={t.auth.fields.emailHint} disabled={busy}/></label>}
     <label className="field"><span>{S.newPassword}</span>
       <input type="password" name="new-password" value={password} onChange={(e) => edit(setPassword)(e.target.value)} autoComplete="new-password" placeholder={t.auth.fields.newPasswordHint} disabled={busy}/></label>
+    {short && <p className="muted tiny" role="status">{S.tooShort(minPassword, minPassword - password.length)}</p>}
     <label className="field"><span>{S.confirm}</span>
       <input type="password" name="confirm-password" value={confirm} onChange={(e) => edit(setConfirm)(e.target.value)} autoComplete="new-password" disabled={busy}/></label>
     {mismatch && <p className="muted tiny" role="status">{S.mismatch}</p>}

@@ -112,6 +112,7 @@ export const settings = {
     bound: (email: string) => `已绑定邮箱：${email}`,
     code: "邮箱验证码",
     newPassword: "新密码",
+    tooShort: (min: number, left: number) => `密码至少需要 ${min} 个字符，还差 ${left} 个`,
     confirm: "确认新密码",
     mismatch: "两次输入的密码不一样",
     change: "修改密码",

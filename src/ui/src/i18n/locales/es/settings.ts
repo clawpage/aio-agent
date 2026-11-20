@@ -15,6 +15,7 @@ export const settings: typeof zh = {
     bound: (email: string) => `Correo: ${email}`,
     code: "Código de verificación",
     newPassword: "Nueva contraseña",
+    tooShort: (min: number, left: number) => `La contraseña necesita al menos ${min} caracteres: faltan ${left}`,
     confirm: "Confirmar nueva contraseña",
     mismatch: "Las contraseñas no coinciden",
     change: "Cambiar contraseña",

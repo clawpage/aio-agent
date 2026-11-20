@@ -114,6 +114,7 @@ export const settings: typeof zh = {
     bound: (email: string) => `メールアドレス：${email}`,
     code: "確認コード",
     newPassword: "新しいパスワード",
+    tooShort: (min: number, left: number) => `パスワードは ${min} 文字以上必要です（あと ${left} 文字）`,
     confirm: "新しいパスワードの確認",
     mismatch: "パスワードが一致しません",
     change: "パスワードを変更",

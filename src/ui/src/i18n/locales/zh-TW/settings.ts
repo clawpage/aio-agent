@@ -113,6 +113,7 @@ export const settings: typeof zh = {
     bound: (email: string) => `已綁定電子郵件：${email}`,
     code: "電子郵件驗證碼",
     newPassword: "新密碼",
+    tooShort: (min: number, left: number) => `密碼至少需要 ${min} 個字元，還差 ${left} 個`,
     confirm: "確認新密碼",
     mismatch: "兩次輸入的密碼不一樣",
     change: "修改密碼",
