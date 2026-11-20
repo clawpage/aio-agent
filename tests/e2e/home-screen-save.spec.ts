@@ -77,6 +77,24 @@ test("when the tap has expired by the time the file arrives, one more tap saves 
   await expect(notice).toHaveCount(0);
 });
 
+test("in the iOS app a second tap while the file is still coming opens no second sheet", async ({ page }) => {
+  await setup(page, { shell: "app" });
+  // The file takes a while; meanwhile the page says it is on its way.
+  let release!: () => void;
+  const arrived = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/files/download**", async (r) => { await arrived; await r.fulfill({ headers: { "content-type": "application/octet-stream" }, body: PNG }); });
+  const download = page.getByTestId("file-preview-download");
+  await download.click();
+  await expect(page.locator(".save-notice")).toHaveText("下载中…");
+  await download.click();
+  release();
+  await expect.poll(() => shared(page)).toEqual([{ name: "人物画像.png", type: "image/png", size: PNG.length }]);
+  await expect(page.locator(".save-notice")).toHaveCount(0);
+  // Once the sheet is closed, 下载 opens it again.
+  await download.click();
+  await expect.poll(() => shared(page).then((s) => s.length)).toBe(2);
+});
+
 test("in a browser tab 下载 is still a real download", async ({ page }) => {
   await setup(page, { standalone: false });
   const download = page.waitForEvent("download");

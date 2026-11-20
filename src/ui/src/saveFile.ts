@@ -146,7 +146,17 @@ function notice(text: string, opts: { error?: boolean; keep?: boolean; action?: 
   if (!opts.keep) window.setTimeout(() => bar.remove(), action ? 20_000 : 4_000);
 }
 
+/**
+ * True from the tap until the share sheet is closed. A second tap meanwhile does nothing: two sheets
+ * asked for at once leave iOS showing a broken one (half on screen, cut off at the edge).
+ */
+let sharing = false;
+
+/** `again`: the first try, from saveFile, which already holds `sharing`; false for the notice's one more tap. */
 async function share(file: File, again: boolean): Promise<void> {
+  if (sharing && !again) return;
+  sharing = true;
+  document.querySelector(".save-notice")?.remove();
   try {
     await navigator.share({ files: [file] });
   } catch (err) {
@@ -156,6 +166,8 @@ async function share(file: File, again: boolean): Promise<void> {
       notice(t.files.save.ready(file.name), { action: { label: t.files.save.save, run: () => void share(file, false) } });
     }
     // AbortError: the sheet was dismissed, nothing to say.
+  } finally {
+    sharing = false;
   }
 }
 
@@ -172,11 +184,18 @@ export function saveFile(source: string | Blob, name: string): boolean {
     return true;
   }
   if (!savesBySharing()) return false;
+  if (sharing) return true;
+  sharing = true;
   void (async () => {
     let blob: Blob;
     try {
-      blob = typeof source === "string" ? await fetchBlob(source) : source;
+      if (typeof source === "string") {
+        // The sheet waits for the whole file: say so, so the tap does not look ignored.
+        notice(t.files.save.saving, { keep: true });
+        blob = await fetchBlob(source);
+      } else blob = source;
     } catch {
+      sharing = false;
       notice(t.files.save.failed(name), { error: true });
       return;
     }
