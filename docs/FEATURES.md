@@ -728,7 +728,7 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
 - **开启**：`PA_ASR_URL` 指向语音识别服务（`POST` 16 位单声道 WAV，返回 `{text}`，可选 `model`、`words`），例如 muse-gadget-sdk 的 `tts-server`
   （X-ASR 中英双语模型，常用词表作热词；请求 `/asr?punct=1` 时加标点并去掉口头禅，只有口头禅时返回空，按钮提示「没听清」）。未配置时 `GET /api/asr` 返回 `{enabled:false}`，按钮不显示。
 - **语言**：`GET /api/asr` 同时返回识别服务能听懂的界面语言 `locales`（X-ASR 听普通话和英语，不支持西班牙语和日语，因此是 `zh-CN`、`zh-TW`、`en`；见 `src/control/http/api.ts` 的 `ASR_LOCALES`）。界面语言（配置页选择或跟随系统）不在其中时不显示麦克风；旧控制面不返回该字段时照常显示。
-  现有部署复用语音配件的识别服务：`PA_ASR_URL=http://192.168.1.118:4910/asr?punct=1`（old-mb）。
+  现有部署复用语音配件的识别服务：`PA_ASR_URL=http://100.80.219.88:4910/asr?punct=1`（old-mb 的 tailnet 地址；局域网地址是 DHCP 分的，2026-11 从 .118 变成 .116 时语音输入和朗读都断过）。
 - **麦克风**：手机和平板（iOS/Android，含网页与 App）上始终用机身麦克风，连着蓝牙、有线或 USB 耳机也不用它们的麦克风：网页只能看到设备名，
   Android（Chrome/WebView）取「Speakerphone」，没有再取「Headset earpiece」，iOS 取名字含 iPhone/iPad 的那个；第一次录音先按默认打开（授权后才看得到名字），
   若不是机身麦克风就换成它（`deviceId: exact`），并把它记在本机（localStorage `voice.builtInMicrophone`），之后直接打开；找不到或打不开时退回系统默认。桌面不变。
@@ -876,7 +876,7 @@ Android 10+ 经 MediaStore 存到「Pictures/Clawpage」「Movies/Clawpage」，
   收 `{text, speaker, language}`、回 24 kHz 16 位单声道 WAV；任何同样契约的服务都可替换）。控制面按句切成不超过 120 字的段（服务端单次生成 60 秒音频封顶，120 字中文约 27 秒）依次请求，拼成一个 WAV
   写进该账号工作区；沙箱本身不接触语音服务。服务比实时慢（old-mb 上约 1.45 倍：120 字中文 39 秒），控制面同一时间只送一个请求，其他账号的请求排队等候（工具超时 20 分钟）。
 - **展示**：执行器把文件写成单独一行的链接 `[说明](路径)`，消息里显示为播放器（见「富内容块」）；要 mp3 或更长的音频由执行器在沙箱里用 ffmpeg 转换、拼接。
-- 现有部署：语音服务在 old-mb（`PA_TTS_URL=http://192.168.1.118:4911/v1/tts`），部署与排障见 [运行手册](RUNBOOK.md)「朗读服务」。
+- 现有部署：语音服务在 old-mb（`PA_TTS_URL=http://100.80.219.88:4911/v1/tts`，old-mb 的 tailnet 地址），部署与排障见 [运行手册](RUNBOOK.md)「朗读服务」。
 
 ## 13. 手机通知（Web Push / iOS App）
 
