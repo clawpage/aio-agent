@@ -209,7 +209,11 @@ export function createApp(ctx: AppContext): express.Express {
         await (CONTAINER_API.test(req.path)?runtime.idle.wakeContainer():runtime.idle.wake());
       }
       api(req,res,next);
-    } catch {res.status(503).json({error:"runtime_unavailable",message:t().http.common.runtimeUnavailable});}
+    } catch(err) {
+      // The reason stays here: the person is only told to try again later.
+      ctx.log.warn("member runtime unavailable",{userId:id,error:err instanceof Error?err.message:String(err)});
+      res.status(503).json({error:"runtime_unavailable",message:t().http.common.runtimeUnavailable});
+    }
   });
 
   // Everything else on the companion origin is the authenticated sandbox proxy.

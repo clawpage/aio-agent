@@ -6,6 +6,8 @@ import type { SandboxdConfig } from "./config.js";
 import type { DockerCli } from "./docker.js";
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+/** Member networks are /24s of this /16: it routes nowhere on the node (not the LAN, not the tailnet). */
+const MEMBER_SUBNETS = "10.213";
 const USER = /^(?:[a-z_][a-z0-9_-]{0,31}|\d{1,6})$/;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CONTAINER_PATH = /^\/[^\0\n]*$/;
@@ -253,6 +255,28 @@ export class SandboxDriver {
     this.#managed.set(name, Date.now());
   }
 
+  /**
+   * A member's own network, on a free /24 of MEMBER_SUBNETS. Docker's default pools hold about 31
+   * networks in all, and every member has one (a stopped sandbox keeps it), so left to Docker the
+   * accounts after that could not get a sandbox at all.
+   */
+  async #createMemberNetwork(name: string): Promise<void> {
+    const ids = (await this.#docker.run(["network", "ls", "-q"], { timeoutMs: 15_000 })).stdout.split(/\s+/).filter(Boolean);
+    const used = ids.length ? await this.#docker.run(["network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", ...ids], { timeoutMs: 15_000 }) : null;
+    const taken = new Set((used?.stdout ?? "").split(/\s+/).filter(Boolean));
+    let error = "no free subnet";
+    for (let i = 0; i < 256; i++) {
+      const subnet = `${MEMBER_SUBNETS}.${i}.0/24`;
+      if (taken.has(subnet)) continue;
+      const created = await this.#docker.run(["network", "create", "--label", "personal-agent.managed=1", "--opt", "com.docker.network.bridge.enable_icc=false", "--subnet", subnet, name]);
+      if (created.code === 0) return;
+      error = created.stderr.trim();
+      // Taken by a network made meanwhile: the next one.
+      if (!/overlap/i.test(error)) break;
+    }
+    throw new Error(`Unable to create isolated sandbox network: ${error}`);
+  }
+
   async #create(spec: SandboxSpec): Promise<void> {
     for (const vol of [spec.workspaceVolume, spec.codexVolume, spec.browserVolume]) {
       const res = await this.#docker.run(["volume", "create", vol], { timeoutMs: 20_000 });
@@ -264,10 +288,7 @@ export class SandboxDriver {
     if (owned.code !== 0) throw new Error(`failed to prepare browser volume: ${owned.stderr.trim()}`);
     if (spec.member) {
       const found = await this.#docker.run(["network", "inspect", spec.member.networkName]);
-      if (found.code !== 0) {
-        const created = await this.#docker.run(["network", "create", "--label", "personal-agent.managed=1", "--opt", "com.docker.network.bridge.enable_icc=false", spec.member.networkName]);
-        if (created.code !== 0) throw new Error("Unable to create isolated sandbox network");
-      }
+      if (found.code !== 0) await this.#createMemberNetwork(spec.member.networkName);
     }
     const args = [
       "run",

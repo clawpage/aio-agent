@@ -96,6 +96,38 @@ describe("sandbox node driver", () => {
     expect(docker.calls.some((c) => c.args.includes("container:aio-user-abc") && c.stdin?.includes("--dport 4902"))).toBe(true);
   });
 
+  it("puts a new member's network on a free /24 of its own range, past Docker's small default pools", async () => {
+    const docker = new FakeDocker();
+    const real = docker.run.bind(docker);
+    let made = 0;
+    docker.run = async (args, opts) => {
+      if (args[0] === "network" && args[1] === "inspect" && !args.includes("--format")) { docker.calls.push({ args }); return { code: 1, stdout: "", stderr: "not found" }; }
+      if (args[0] === "network" && args[1] === "ls") { docker.calls.push({ args }); return { code: 0, stdout: "n1\nn2\nn3\n", stderr: "" }; }
+      if (args[0] === "network" && args[1] === "inspect") { docker.calls.push({ args }); return { code: 0, stdout: "172.17.0.0/16 \n10.213.0.0/24 \n\n", stderr: "" }; }
+      // 10.213.1.0/24 went to a network made meanwhile.
+      if (args[0] === "network" && args[1] === "create" && ++made === 1) { docker.calls.push({ args }); return { code: 1, stdout: "", stderr: "Pool overlaps with other one on this address space" }; }
+      return real(args, opts);
+    };
+    const driver = new SandboxDriver(config(), log, docker as unknown as DockerCli);
+    const port = await healthServer();
+    await driver.ensure(spec({ hostPort: port, member: { networkName: "aio-user-abc", gatewayPort: 4902 } }), 10_000);
+    const creates = docker.calls.filter((c) => c.args[0] === "network" && c.args[1] === "create").map((c) => c.args);
+    expect(creates.map((a) => a[a.indexOf("--subnet") + 1])).toEqual(["10.213.1.0/24", "10.213.2.0/24"]);
+    expect(creates[1]).toEqual(expect.arrayContaining(["--label", "personal-agent.managed=1", "--opt", "com.docker.network.bridge.enable_icc=false", "aio-user-abc"]));
+  });
+
+  it("says why a member network could not be made", async () => {
+    const docker = new FakeDocker();
+    const real = docker.run.bind(docker);
+    docker.run = async (args, opts) => {
+      if (args[0] === "network" && args[1] === "inspect" && !args.includes("--format")) return { code: 1, stdout: "", stderr: "not found" };
+      if (args[0] === "network" && args[1] === "create") return { code: 1, stdout: "", stderr: "daemon unreachable" };
+      return real(args, opts);
+    };
+    const driver = new SandboxDriver(config(), log, docker as unknown as DockerCli);
+    await expect(driver.ensure(spec({ member: { networkName: "aio-user-abc", gatewayPort: 4902 } }), 10_000)).rejects.toThrow("Unable to create isolated sandbox network: daemon unreachable");
+  });
+
   it("caps the owner's sandbox at 2 GB without member limits and guards the given peer ports", async () => {
     const docker = new FakeDocker();
     const driver = new SandboxDriver(config({ addHostGateway: true }), log, docker as unknown as DockerCli);

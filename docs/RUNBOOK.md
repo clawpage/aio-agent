@@ -227,6 +227,7 @@ docker exec aio-control-1 node bin/create-user.mjs <username>          # compose
 账号固定 member，随机密码只写 `var/user-secrets/<username>.txt`（0600）；重复执行拒绝覆盖。
 也可凭 owner 在配置页「邀请码」生成的一次性邀请码在 `/register` 自助注册（同样只建 member）；注册页提示的申请邮箱来自 `PA_INVITE_EMAIL`（当前部署写在 `var/deploy/control.env`，为 invitation@clawpage.ai）。两种方式都不改变 owner 密码与会话。member 默认 `gpt-6.2-sol` / high，经成员模型网关使用控制面的 ChatGPT 登录，因此上线前需确认控制面已 `codex-login` 且 `AIO_HOST_CODEX=on`。
 member 首次访问或服务启动时创建独立 `aio-user-<散列>` 容器及三卷，数据存在控制层数据目录的 `users/<散列>/`；owner 原卷保留。
+每个 member 还有自己的网络 `aio-user-<散列>`（停着的沙箱也保留它），节点 sandboxd 从 `10.213.0.0/16` 里挑一个空闲的 /24 建（`src/sandbox/driver.ts`，最多 256 个）。不用 Docker 默认地址池：它总共只够约 31 个网络，2026-11-22 曾被占满，新账号建不出沙箱，只看到「独立环境暂不可用」。控制面日志 `member runtime unavailable` 会写明原因。
 成员工作区与 owner 共用 `agent-workspace.clawpage.ai`，用路径 `/u/<用户名>/`（兼容旧的 `/u/<散列>/`）区分账号，无需新增 CNAME/TLS/tunnel；前缀与会话账号不符时 401，不会回退 owner 工作区。
 成员模型网关只接受各成员分配模型的请求：`gpt-6.2-sol` 成员的无状态 Responses、Claude 成员的 Messages，其余一律拒绝（默认端口 4902，控制面的 ChatGPT 登录与 owner 的 Claude 凭据只在宿主侧附加），凭据按账号存放 `var/users/<散列>/model-token`，不可公开。网络守卫镜像 `aio-agent-network-guard:1` 从固定沙箱镜像构建，独立只读运行并只授予 NET_ADMIN。
 运行验收必须包括：两个账号的同名文件互不可见；任务/HTTP/WS 指向各自容器；成员不能 TCP 连接 owner 容器与宿主私网服务；成员卷没有 owner auth.json/记忆；成员无法读取 owner 历史响应。
