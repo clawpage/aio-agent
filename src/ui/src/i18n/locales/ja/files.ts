@@ -61,6 +61,8 @@ export const files: typeof zh = {
     saving: 'ダウンロード中…',
     saved: '写真に保存しました',
     saveFailed: (name: string) => `${name} を写真に保存できませんでした。しばらくしてからもう一度お試しください`,
+    savedToFiles: 'ファイルに保存しました',
+    filesFailed: (name: string) => `${name} をファイルに保存できませんでした。しばらくしてからもう一度お試しください`,
     denied: '写真に追加する権限がありません',
     settings: '設定を開く',
   },

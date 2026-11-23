@@ -18,6 +18,10 @@ import { t } from "./i18n";
  * `aioSaveMedia` bridge writes the bytes the page already has straight into
  * Photos (the gallery on Android), and the page says 下载中… then 已存到相册.
  * An app without the bridge keeps the share sheet (iOS) or the plain link (Android).
+ *
+ * Any other file in an iOS app whose shell has the `aioSaveToFiles` marker goes through
+ * the same bridge to the system's full-screen "save to Files" picker: on iOS 26 the
+ * share sheet is a small panel that a large system text size crops past use.
  */
 export function savesBySharing(): boolean {
   const shell = (window as ShellWindow).webkit?.messageHandlers?.aioSaveFiles;
@@ -28,7 +32,7 @@ export function savesBySharing(): boolean {
 const PHOTO_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "video/mp4", "video/quicktime", "video/x-m4v"]);
 
 type MediaMessage =
-  | { type: "begin"; name: string; mime: string }
+  | { type: "begin"; name: string; mime: string; to?: "files" }
   | { type: "chunk"; id: string; data: string }
   | { type: "finish" | "cancel"; id: string }
   | { type: "settings" };
@@ -37,7 +41,7 @@ type MediaReply = { id?: string; error?: string };
 /** iOS: a reply handler whose promise is the answer. Android: a web message listener that answers with a message. */
 type WebkitBridge = { postMessage(message: string): Promise<string> };
 type AndroidBridge = { postMessage(message: string): void; addEventListener(type: "message", listener: (event: MessageEvent<string>) => void): void };
-type ShellWindow = Window & { webkit?: { messageHandlers?: { aioSaveFiles?: unknown; aioSaveMedia?: WebkitBridge } }; aioSaveMedia?: AndroidBridge };
+type ShellWindow = Window & { webkit?: { messageHandlers?: { aioSaveFiles?: unknown; aioSaveToFiles?: unknown; aioSaveMedia?: WebkitBridge } }; aioSaveMedia?: AndroidBridge };
 
 /** Android answers out of band, so each message carries a number its answer repeats. */
 const androidWaiting = new Map<number, (reply: MediaReply) => void>();
@@ -83,12 +87,15 @@ async function fetchBlob(url: string): Promise<Blob> {
   return res.blob();
 }
 
-/** Into Photos through the app: permission first (iOS asks once), then the bytes, then one line for how it went. */
-async function saveToPhotos(ask: (message: MediaMessage) => Promise<MediaReply>, source: string | Blob, name: string, mime: string): Promise<void> {
+/**
+ * Into Photos through the app: permission first (iOS asks once), then the bytes, then one line for how it went.
+ * `files`: into Files instead, through the picker "finish" opens; closing it without saving says nothing.
+ */
+async function saveThroughApp(ask: (message: MediaMessage) => Promise<MediaReply>, source: string | Blob, name: string, mime: string, files: boolean): Promise<void> {
   notice(t.files.save.saving, { keep: true });
   let id: string | undefined;
   try {
-    const begun = await ask({ type: "begin", name, mime });
+    const begun = await ask({ type: "begin", name, mime, ...(files ? { to: "files" as const } : {}) });
     if (begun.error === "denied") {
       notice(t.files.save.denied, { error: true, action: { label: t.files.save.settings, run: () => void ask({ type: "settings" }).catch(() => undefined) } });
       return;
@@ -107,13 +114,16 @@ async function saveToPhotos(ask: (message: MediaMessage) => Promise<MediaReply>,
       const sent = await ask({ type: "chunk", id, data: await base64(blob.slice(at, at + CHUNK)) });
       if (sent.error) throw new Error(sent.error);
     }
+    // The picker stays up while the person chooses a folder; the 下载中… line would sit under it.
+    if (files) document.querySelector(".save-notice")?.remove();
     const done = await ask({ type: "finish", id });
     id = undefined;
+    if (done.error === "cancelled") return;
     if (done.error) throw new Error(done.error);
-    notice(t.files.save.saved);
+    notice(files ? t.files.save.savedToFiles : t.files.save.saved);
   } catch {
     if (id) void ask({ type: "cancel", id }).catch(() => undefined);
-    notice(t.files.save.saveFailed(name), { error: true });
+    notice(files ? t.files.save.filesFailed(name) : t.files.save.saveFailed(name), { error: true });
   }
 }
 
@@ -147,8 +157,8 @@ function notice(text: string, opts: { error?: boolean; keep?: boolean; action?: 
 }
 
 /**
- * True from the tap until the share sheet is closed. A second tap meanwhile does nothing: two sheets
- * asked for at once leave iOS showing a broken one (half on screen, cut off at the edge).
+ * True from the tap until the share sheet (or the app's save, or its Files picker) is done. A second
+ * tap meanwhile does nothing: two sheets asked for at once leave iOS showing a broken one.
  */
 let sharing = false;
 
@@ -179,8 +189,11 @@ async function share(file: File, again: boolean): Promise<void> {
 export function saveFile(source: string | Blob, name: string): boolean {
   const ask = mediaBridge();
   const mime = typeOf(name, typeof source === "string" ? undefined : source);
-  if (ask && PHOTO_TYPES.has(mime)) {
-    void saveToPhotos(ask, source, name, mime);
+  const files = Boolean((window as ShellWindow).webkit?.messageHandlers?.aioSaveToFiles);
+  if (ask && (PHOTO_TYPES.has(mime) || files)) {
+    if (sharing) return true;
+    sharing = true;
+    void saveThroughApp(ask, source, name, mime, files && !PHOTO_TYPES.has(mime)).finally(() => { sharing = false; });
     return true;
   }
   if (!savesBySharing()) return false;

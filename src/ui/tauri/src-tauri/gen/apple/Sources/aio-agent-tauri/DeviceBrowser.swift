@@ -114,14 +114,21 @@ private final class SaveFilesMarker: NSObject, WKScriptMessageHandler {
 // Photos), the file in base64 "chunk"s (a long video is never one huge message), then "finish" or
 // "cancel"; "settings" opens this app's page in Settings, where a refusal is undone. Every answer is a
 // JSON string: {"id"} for "begin", {"error": "denied" | …} when something failed, {} otherwise.
-private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply {
+//
+// Any other file goes to Files: "begin" with "to": "files" (any type, no permission), and "finish" opens
+// the system's full-screen "save to Files" picker; its answer waits for the picker, {"error": "cancelled"}
+// when it is closed without saving. The share sheet this replaces is a small panel on iOS 26 that a large
+// system text size crops past use. The `aioSaveToFiles` marker tells the console this shell can.
+private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply, UIDocumentPickerDelegate {
     private static let types: [String: (ext: String, kind: PHAssetResourceType)] = [
         "image/png": ("png", .photo), "image/jpeg": ("jpg", .photo), "image/gif": ("gif", .photo),
         "image/webp": ("webp", .photo), "image/heic": ("heic", .photo),
         "video/mp4": ("mp4", .video), "video/quicktime": ("mov", .video), "video/x-m4v": ("m4v", .video),
     ]
-    private struct Transfer { let file: URL; let handle: FileHandle; let kind: PHAssetResourceType; let name: String }
+    private struct Transfer { let file: URL; let handle: FileHandle; let kind: PHAssetResourceType?; let name: String }
     private var transfers: [String: Transfer] = [:]
+    /** The picker on screen, with the answer it owes and the folder its copy came from. */
+    private var exporting: (picker: UIDocumentPickerViewController, reply: ([String: String]) -> Void, folder: URL)?
 
     override init() {
         super.init()
@@ -146,6 +153,18 @@ private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply 
               let type = body["type"] as? String else { reply(["error": "refused"]); return }
         let id = body["id"] as? String ?? ""
         switch type {
+        case "begin" where body["to"] as? String == "files":
+            let given = ((body["name"] as? String) ?? "").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: ":", with: "_")
+            let name = given.isEmpty || given.hasPrefix(".") ? "file" : String(given.prefix(200))
+            let id = UUID().uuidString
+            // A folder of its own, so the copy in Files keeps the file's own name.
+            let folder = FileManager.default.temporaryDirectory.appendingPathComponent("aio-save-\(id)")
+            let file = folder.appendingPathComponent(name)
+            guard (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil,
+                  FileManager.default.createFile(atPath: file.path, contents: nil),
+                  let handle = try? FileHandle(forWritingTo: file) else { reply(["error": "failed"]); return }
+            transfers[id] = Transfer(file: file, handle: handle, kind: nil, name: name)
+            reply(["id": id])
         case "begin":
             guard let mime = body["mime"] as? String, let entry = Self.types[mime] else { reply(["error": "type"]); return }
             let name = String(((body["name"] as? String) ?? "").replacingOccurrences(of: "/", with: "_").prefix(200))
@@ -176,10 +195,24 @@ private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply 
         case "finish":
             guard let transfer = transfers.removeValue(forKey: id) else { reply(["error": "failed"]); return }
             try? transfer.handle.close()
+            guard let kind = transfer.kind else {
+                let folder = transfer.file.deletingLastPathComponent()
+                guard exporting == nil, var presenter = message.webView?.window?.rootViewController else {
+                    try? FileManager.default.removeItem(at: folder)
+                    reply(["error": "failed"])
+                    return
+                }
+                while let next = presenter.presentedViewController { presenter = next }
+                let picker = UIDocumentPickerViewController(forExporting: [transfer.file], asCopy: true)
+                picker.delegate = self
+                exporting = (picker, reply, folder)
+                presenter.present(picker, animated: true)
+                return
+            }
             PHPhotoLibrary.shared().performChanges({
                 let options = PHAssetResourceCreationOptions()
                 if !transfer.name.isEmpty { options.originalFilename = transfer.name }
-                PHAssetCreationRequest.forAsset().addResource(with: transfer.kind, fileURL: transfer.file, options: options)
+                PHAssetCreationRequest.forAsset().addResource(with: kind, fileURL: transfer.file, options: options)
             }) { ok, _ in
                 DispatchQueue.main.async {
                     try? FileManager.default.removeItem(at: transfer.file)
@@ -199,7 +232,17 @@ private final class SaveMediaHandler: NSObject, WKScriptMessageHandlerWithReply 
     private func drop(_ id: String) {
         guard let transfer = transfers.removeValue(forKey: id) else { return }
         try? transfer.handle.close()
-        try? FileManager.default.removeItem(at: transfer.file)
+        try? FileManager.default.removeItem(at: transfer.kind == nil ? transfer.file.deletingLastPathComponent() : transfer.file)
+    }
+
+    func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) { exported(controller, saved: true) }
+    func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) { exported(controller, saved: false) }
+
+    private func exported(_ picker: UIDocumentPickerViewController, saved: Bool) {
+        guard let done = exporting, done.picker === picker else { return }
+        exporting = nil
+        try? FileManager.default.removeItem(at: done.folder)
+        done.reply(saved ? [:] : ["error": "cancelled"])
     }
 }
 
@@ -423,6 +466,7 @@ final class DeviceBrowser: NSObject {
     static func install(_ webView: WKWebView) {
         webView.configuration.userContentController.add(DeviceBrowserHandler(webView), name: "aioDeviceBrowser")
         webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveFiles")
+        webView.configuration.userContentController.add(SaveFilesMarker(), name: "aioSaveToFiles")
         webView.configuration.userContentController.addScriptMessageHandler(SaveMediaHandler(), contentWorld: .page, name: "aioSaveMedia")
         webView.configuration.userContentController.add(AppleSignInHandler(webView), name: "aioAppleSignIn")
         webView.configuration.userContentController.add(PushHandler(webView), name: "aioPush")

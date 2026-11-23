@@ -102,8 +102,12 @@ requests, and the wait was the check with the sandbox, which any cache has to ma
   `WRITE_EXTERNAL_STORAGE`, declared with `maxSdkVersion 28`), base64 `chunk`s of 512 KB into a temp file
   (`aio-save-*`, swept at start), then `finish` (PHAssetCreationRequest / MediaStore `Pictures|Movies/Clawpage`) or
   `cancel`; `settings` opens the app's system settings after a refusal. The page shows 下载中… then 已存到相册.
-  Without the handler the console keeps the share sheet (iOS) or the plain link (Android). Regression:
-  `tests/e2e/media-save.spec.ts`, `tests/e2e/home-screen-save.spec.ts` (bridges stubbed).
+  Without the handler the console keeps the share sheet (iOS) or the plain link (Android).
+  iOS only: any other file goes `begin` with `"to": "files"` (no permission, a temp folder of its own so the
+  copy keeps its name) and `finish` presents `UIDocumentPickerViewController(forExporting:asCopy:)`, answering
+  when it closes (`{"error": "cancelled"}` unsaved). The `aioSaveToFiles` marker says the shell can; on iOS 26 the
+  share sheet is a small panel a large text size crops past use. Regression:
+  `tests/e2e/media-save.spec.ts`, `tests/e2e/home-screen-save.spec.ts`, `tests/e2e/files-save.spec.ts` (bridges stubbed).
 - Camera (the attachment picker's "Take Photo/Video"): iOS declares `NSCameraUsageDescription`
   (`gen/apple/project.yml` and the generated `Info.plist`). Without it iOS kills the app the
   moment the camera opens (TCC: "attempted to access privacy-sensitive data without a usage

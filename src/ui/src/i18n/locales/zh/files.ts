@@ -60,6 +60,9 @@ export const files = {
     saving: "下载中…",
     saved: "已存到相册",
     saveFailed: (name: string) => `${name} 没能存到相册，请稍后再试`,
+    /** In the iOS app, a file that is not a photo or video goes to Files through the system picker. */
+    savedToFiles: "已存到文件",
+    filesFailed: (name: string) => `${name} 没能存到文件，请稍后再试`,
     denied: "没有存入相册的权限",
     settings: "去设置",
   },

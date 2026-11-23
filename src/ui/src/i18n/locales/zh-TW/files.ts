@@ -60,6 +60,8 @@ export const files: typeof zh = {
     saving: "下載中…",
     saved: "已存到相簿",
     saveFailed: (name: string) => `${name} 沒能存到相簿，請稍後再試`,
+    savedToFiles: "已存到檔案",
+    filesFailed: (name: string) => `${name} 沒能存到檔案，請稍後再試`,
     denied: "沒有存入相簿的權限",
     settings: "前往設定",
   },
