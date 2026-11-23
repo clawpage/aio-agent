@@ -136,3 +136,10 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 - 原生改动（`7747315`）：在 AI 浏览器里点「完成，交还给 AI」后，面板自己缩回右上角小窗（`AIBrowser.swift`），见 `docs/FEATURES.md`。
 - 构建 `0.1.5 (0.1.5.3)`（`--build-number 3`），`altool` 上传成功（Delivery UUID `9136506d-2ff4-43a3-9ed0-c5c44a4ee539`），处理为 VALID 后加入外部测试组、填中英文「测试内容」，同版本号无需再审，状态 `IN_BETA_TESTING`。
 - 模拟器上 `tests/devices/ios.e2e.test.ts` 6 项通过，但其中没有点「完成」这一步；交还后缩回小窗只编译通过，未在模拟器或真机上点过。
+
+## 2026-11-23 0.1.5 (0.1.5.4)：非图片文件存到「文件」（TestFlight）
+
+- 原生改动（`33883f5`）：下载非图片文件时用系统「存储到文件」面板（`aioSaveToFiles`，`DeviceBrowser.swift`），取代在大字号下会被裁坏的分享面板；图片仍直接存相册。见 `docs/FEATURES.md`。
+- 构建 `0.1.5 (0.1.5.4)`（`--build-number 4`，Xcode 26.2 / iOS 26.2 SDK），`altool` 上传成功，处理为 VALID 后加入外部测试组、填中英文「测试内容」，提交 Beta 审核后状态 `WAITING_FOR_REVIEW`。
+- Apple 回信 ITMS-90725：2027 年 4 月起须用 iOS 27 SDK（Xcode 27）构建，本次只是警告。商店版本 0.1.5 等 Xcode 27 构建再提审。
+- 模拟器（iOS 26.2）上走通：面板弹出、存储后文件落到所选位置、临时目录清掉；大字号下面板完整可用。取消只由 e2e 覆盖；真机未验。
