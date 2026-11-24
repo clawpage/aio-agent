@@ -141,5 +141,7 @@ The task browser can visit arbitrary websites on the user's request, so the age 
 
 - 原生改动（`33883f5`）：下载非图片文件时用系统「存储到文件」面板（`aioSaveToFiles`，`DeviceBrowser.swift`），取代在大字号下会被裁坏的分享面板；图片仍直接存相册。见 `docs/FEATURES.md`。
 - 构建 `0.1.5 (0.1.5.4)`（`--build-number 4`，Xcode 26.2 / iOS 26.2 SDK），`altool` 上传成功，处理为 VALID 后加入外部测试组、填中英文「测试内容」，提交 Beta 审核后状态 `WAITING_FOR_REVIEW`。
-- Apple 回信 ITMS-90725：2027 年 4 月起须用 iOS 27 SDK（Xcode 27）构建，本次只是警告。商店版本 0.1.5 等 Xcode 27 构建再提审。
+- Apple 回信 ITMS-90725：2027 年 4 月起须用 iOS 27 SDK（Xcode 27）构建，本次只是警告；本机升级 Xcode 27 需 sudo，待用户执行。
 - 模拟器（iOS 26.2）上走通：面板弹出、存储后文件落到所选位置、临时目录清掉；大字号下面板完整可用。取消只由 e2e 覆盖；真机未验。
+- 2026-11-24 提审：Connect 新建版本 0.1.5（描述、关键词、五张截图从 0.1.4 带过来），填四语言「此版本的新增内容」（存到「文件」、无网提示），挂构建 0.1.5.4，
+  审核联系人与审核账号从 0.1.4 复制（逐项回读一致），`AFTER_APPROVAL`；提交后状态 `WAITING_FOR_REVIEW`。
