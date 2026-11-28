@@ -700,7 +700,8 @@ if attached mcp-server-browser; then supervisorctl restart mcp-server-browser >/
 if attached python-server; then
   busy=$(curl -s -m 5 http://127.0.0.1:8091/v1/shell/sessions | python3 -c 'import json,sys; s=json.load(sys.stdin)["data"]["sessions"].values(); print(sum(1 for v in s if v.get("status") in ("running", "no_change_timeout")))' 2>/dev/null || echo unknown)
   clients=$(ss -tnH state established "( sport = :8091 )" | wc -l)
-  if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl restart python-server >/dev/null 2>&1 && echo python-server; fi
+  # A signal, not restart: a client-side stop-then-start cut off mid-stop leaves it stopped; autorestart brings it back.
+  if [ "$busy" = 0 ] && [ "$clients" = 0 ]; then supervisorctl signal TERM python-server >/dev/null 2>&1 && echo python-server; fi
 fi`;
     const res = await this.execInSandbox(["sh", "-c", script, "sh", this.#cfg.sandbox.containerUser], { timeoutMs: 60_000, user: "root" });
     return res.stdout.split("\n").map((line) => line.trim()).filter(Boolean);

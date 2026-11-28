@@ -1321,13 +1321,22 @@ def heal_aio_api(deadline: float | None = None) -> bool:
     keeps every tab. It also serves the terminal, so it is restarted only when idle (the same rule as
     the control plane's dropImageCdpClients). Returns whether the tab list answers.
     """
+    try:  # stopped by anything (an interrupted restart did, 2026-11-27): it serves the tab list
+        status = subprocess.run(["supervisorctl", "status", "python-server"], capture_output=True, text=True, timeout=10, check=False)
+        if " RUNNING " not in status.stdout and " STARTING " not in status.stdout:
+            subprocess.run(["supervisorctl", "start", "python-server"], capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.SubprocessError):
+        pass
     for _ in range(2):  # a slow but working API answers in a few seconds
         if aio_tabs()[0] is not None:
             return True
     if not _python_server_idle():
         return False
     try:
-        subprocess.run(["supervisorctl", "restart", "python-server"], capture_output=True, text=True, timeout=30, check=False)
+        # Not `supervisorctl restart`: that is a stop then a start sent by the client, and a wedged
+        # server takes ~45 s to stop, so the timeout killed the client in between and left
+        # python-server stopped for good. A signal is one call; supervisord's autorestart brings it back.
+        subprocess.run(["supervisorctl", "signal", "TERM", "python-server"], capture_output=True, text=True, timeout=30, check=False)
     except (OSError, subprocess.SubprocessError):
         return False
     until = time.monotonic() + AIO_HEAL_DEADLINE_S

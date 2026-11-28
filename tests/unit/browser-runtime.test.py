@@ -534,11 +534,13 @@ def test_tab_plan_refuses_to_guess_when_api_is_unavailable() -> None:
 def test_heal_aio_api_restarts_a_wedged_python_server_only_when_idle() -> None:
     saved = (rt.aio_tabs, rt._python_server_idle, rt.subprocess.run, rt.time.sleep, rt.AIO_HEAL_DEADLINE_S)
     calls: list[list[str]] = []
-    state = {"alive": False, "idle": True}
+    state = {"alive": False, "idle": True, "status": "RUNNING"}
 
     def fake_run(argv: list[str], **_: Any) -> Any:
+        if argv[1] == "status":
+            return rt.subprocess.CompletedProcess(argv, 0, f"python-server                    {state['status']}   pid 1\n", "")
         calls.append(list(argv))
-        state["alive"] = True
+        state["alive"], state["status"] = True, "RUNNING"
         return rt.subprocess.CompletedProcess(argv, 0, "", "")
 
     try:
@@ -551,15 +553,19 @@ def test_heal_aio_api_restarts_a_wedged_python_server_only_when_idle() -> None:
         state["alive"] = True
         assert_true(rt.heal_aio_api(), "接口正常时直接通过")
         assert_eq(calls, [], "接口正常时不得重启")
-        # Wedged and idle: one restart, then it answers.
+        # Wedged and idle: one signal (supervisord restarts it), then it answers.
         state["alive"] = False
         assert_true(rt.heal_aio_api(), "重启后接口恢复")
-        assert_eq(calls, [["supervisorctl", "restart", "python-server"]], "只重启 python-server 一次")
+        assert_eq(calls, [["supervisorctl", "signal", "TERM", "python-server"]], "只用信号重启 python-server 一次，不用会被超时切断的 restart")
         # Wedged while a terminal is in use: left alone.
         calls.clear()
         state["alive"], state["idle"] = False, False
         assert_false(rt.heal_aio_api(), "终端在用时不重启")
         assert_eq(calls, [], "终端在用时不得重启")
+        # Left stopped (an interrupted restart did, 2026-11-27): started again even while a terminal is in use.
+        state["alive"], state["status"] = False, "STOPPED"
+        assert_true(rt.heal_aio_api(), "停掉的 python-server 被拉起后接口恢复")
+        assert_eq(calls, [["supervisorctl", "start", "python-server"]], "停掉时只做 start")
     finally:
         rt.aio_tabs, rt._python_server_idle, rt.subprocess.run, rt.time.sleep, rt.AIO_HEAL_DEADLINE_S = saved
 
