@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # UI layer: the built console plus its edge server (static files + /api pass-through).
 # The UI image now serving (deploy/aio.mjs passes it); without one, the build stands alone.
 ARG AIO_UI_PREVIOUS=build

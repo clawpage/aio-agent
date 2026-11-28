@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Control layer: accounts, tasks, agents, the workspace proxy and the sandbox gateway.
 # It holds no Docker access; sandboxes are reached only through sandbox nodes.
 FROM node:26-bookworm-slim AS build

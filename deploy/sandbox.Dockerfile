@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Sandbox layer: sandboxd, the only component with Docker access. It runs no user
 # code and offers only fixed operations on the sandbox containers it manages.
 FROM node:26-bookworm-slim AS build
